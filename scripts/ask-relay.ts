@@ -24,7 +24,10 @@ async function main() {
     if (command.action === "index") {
       console.log(
         indexOutput(
-          await indexProspectResearch(command.prospectId, { database: db, embed }),
+          await indexProspectResearch(command.prospectId, {
+            database: db,
+            embed,
+          }),
         ),
       );
       return;

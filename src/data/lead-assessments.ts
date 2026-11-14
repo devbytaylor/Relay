@@ -16,26 +16,22 @@ export const STALE_ASSESSMENT_MINUTES = 30;
 const HISTORY_LIMIT = 10;
 
 export type AssessmentStatus =
-  | "generating"
-  | "completed"
-  | "failed"
-  | "needs_review";
+  "generating" | "completed" | "failed" | "needs_review";
 
 export type AssessmentUnavailableCode =
-  | "not_eligible"
-  | "in_progress"
-  | "held"
-  | "attempt_limit";
+  "not_eligible" | "in_progress" | "held" | "attempt_limit";
 
 // A refusal made before any paid call. It carries no provider or driver text.
 export class AssessmentUnavailableError extends Error {
   constructor(readonly code: AssessmentUnavailableCode) {
     super(
       {
-        not_eligible: "This prospect has no complete, indexed website research to assess.",
+        not_eligible:
+          "This prospect has no complete, indexed website research to assess.",
         in_progress: "An assessment for this research is already running.",
         held: "An earlier assessment for this research needs review before another paid run.",
-        attempt_limit: "Assessment attempts for this research reached the limit; review before another paid run.",
+        attempt_limit:
+          "Assessment attempts for this research reached the limit; review before another paid run.",
       }[code],
     );
     this.name = "AssessmentUnavailableError";
@@ -86,7 +82,8 @@ export function evidenceFingerprint(input: FingerprintInput): string {
       row.embedding_model,
     ]),
   ];
-  if (pipelineVersion > BASELINE_ASSESSMENT_PIPELINE_VERSION) parts.push(pipelineVersion);
+  if (pipelineVersion > BASELINE_ASSESSMENT_PIPELINE_VERSION)
+    parts.push(pipelineVersion);
   return sha256(JSON.stringify(parts));
 }
 
@@ -188,7 +185,9 @@ export async function reserveAssessment(
 ): Promise<AssessmentReservation> {
   try {
     // Refusals are returned, not thrown, so the stale-run hold below commits.
-    const outcome = await transaction<AssessmentReservation | AssessmentRefusal>(deps.database, async (client) => {
+    const outcome = await transaction<
+      AssessmentReservation | AssessmentRefusal
+    >(deps.database, async (client) => {
       const prospect = await client.query(
         "SELECT id FROM prospects WHERE id = $1 FOR UPDATE",
         [prospectId],
@@ -206,7 +205,11 @@ export async function reserveAssessment(
         [prospectId, STALE_ASSESSMENT_MINUTES],
       );
 
-      const version = await currentEvidenceVersion(prospectId, client, deps.pipelineVersion);
+      const version = await currentEvidenceVersion(
+        prospectId,
+        client,
+        deps.pipelineVersion,
+      );
       if (
         !version ||
         (version.indexStatus !== null && version.indexStatus !== "ready") ||
@@ -236,7 +239,13 @@ export async function reserveAssessment(
         `INSERT INTO lead_intake_assessments (
           id, prospect_id, research_request_id, evidence_fingerprint, status, model
         ) VALUES ($1, $2, $3, $4, 'generating', $5)`,
-        [id, prospectId, version.researchRequestId, version.fingerprint, deps.model],
+        [
+          id,
+          prospectId,
+          version.researchRequestId,
+          version.fingerprint,
+          deps.model,
+        ],
       );
       return {
         kind: "reserved",
@@ -245,7 +254,8 @@ export async function reserveAssessment(
         fingerprint: version.fingerprint,
       };
     });
-    if (outcome.kind === "refused") throw new AssessmentUnavailableError(outcome.code);
+    if (outcome.kind === "refused")
+      throw new AssessmentUnavailableError(outcome.code);
     return outcome;
   } catch (error) {
     if ((error as { code?: unknown }).code === "23505")
@@ -317,7 +327,11 @@ export async function listAssessments(
   database: Database,
   pipelineVersion: number = ASSESSMENT_PIPELINE_VERSION,
 ): Promise<AssessmentHistory> {
-  const current = await currentEvidenceVersion(prospectId, database, pipelineVersion);
+  const current = await currentEvidenceVersion(
+    prospectId,
+    database,
+    pipelineVersion,
+  );
   const rows = (
     await database.query<{
       id: string;

@@ -50,7 +50,9 @@ export const WITHHELD_REASON_CAUSE = {
   question_internal_id: "text_standard",
 } as const satisfies Record<string, WithheldCause>;
 export type WithheldReason = keyof typeof WITHHELD_REASON_CAUSE;
-export const WITHHELD_REASONS = Object.keys(WITHHELD_REASON_CAUSE) as WithheldReason[];
+export const WITHHELD_REASONS = Object.keys(
+  WITHHELD_REASON_CAUSE,
+) as WithheldReason[];
 
 // Where in the model's draft the item was.
 export type WithheldField =
@@ -93,7 +95,9 @@ export type WithheldEntry = {
   excerpt?: string;
 };
 
-export type WithheldInput = Omit<WithheldEntry, "cause" | "excerpt"> & { excerpt?: string };
+export type WithheldInput = Omit<WithheldEntry, "cause" | "excerpt"> & {
+  excerpt?: string;
+};
 
 // An excerpt is kept only for rejections of a quote that is verbatim in the saved research. For every
 // other reason (no quote, a quote not in the source, instruction-like text, any question) the text is
@@ -119,7 +123,9 @@ export function ledgerExcerpt(value: string): string {
     .replace(/[<>]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return clean.length > EXCERPT_LIMIT ? `${clean.slice(0, EXCERPT_LIMIT - 1).trimEnd()}…` : clean;
+  return clean.length > EXCERPT_LIMIT
+    ? `${clean.slice(0, EXCERPT_LIMIT - 1).trimEnd()}…`
+    : clean;
 }
 
 // Builds the stored entry: the cause comes from the reason, the excerpt is sanitized, and unset fields are
@@ -135,7 +141,8 @@ export function withheldEntry(input: WithheldInput): WithheldEntry {
   if (input.claim !== undefined) entry.claim = input.claim;
   if (input.sources?.length) entry.sources = input.sources;
   if (input.unknown !== undefined) entry.unknown = input.unknown;
-  if (input.evidenceStatus !== undefined) entry.evidenceStatus = input.evidenceStatus;
+  if (input.evidenceStatus !== undefined)
+    entry.evidenceStatus = input.evidenceStatus;
   if (input.feature !== undefined) entry.feature = input.feature;
   if (input.replacedByNeutral) entry.replacedByNeutral = true;
   if (input.excerpt && EXCERPT_REASONS.has(input.reason)) {
@@ -145,7 +152,10 @@ export function withheldEntry(input: WithheldInput): WithheldEntry {
   return entry;
 }
 
-type WithDiagnostics = { withheld?: unknown; diagnostics?: { withheld?: unknown } | undefined } | null | undefined;
+type WithDiagnostics =
+  | { withheld?: unknown; diagnostics?: { withheld?: unknown } | undefined }
+  | null
+  | undefined;
 
 // The stored ledger, or null for an assessment saved before the ledger existed.
 export function storedLedger(result: unknown): WithheldEntry[] | null {
@@ -155,12 +165,21 @@ export function storedLedger(result: unknown): WithheldEntry[] | null {
 
 // The recorded withheld count must equal the ledger's size. An assessment without a ledger (saved earlier)
 // is not checked, and nothing is inferred about it.
-export function assertLedgerMatchesCount(result: unknown, withheldCount: number): void {
+export function assertLedgerMatchesCount(
+  result: unknown,
+  withheldCount: number,
+): void {
   const diagnostics = (result as WithDiagnostics)?.diagnostics;
   if (diagnostics === undefined) return;
   const ledger = diagnostics?.withheld;
-  if (!Array.isArray(ledger) || ledger.length !== withheldCount || (result as { withheld?: unknown }).withheld !== withheldCount)
-    throw new Error("Assessment withheld count does not match its rejection ledger.");
+  if (
+    !Array.isArray(ledger) ||
+    ledger.length !== withheldCount ||
+    (result as { withheld?: unknown }).withheld !== withheldCount
+  )
+    throw new Error(
+      "Assessment withheld count does not match its rejection ledger.",
+    );
 }
 
 // A grouped, line-per-entry view for an operator reading a saved assessment offline.
@@ -172,8 +191,10 @@ export function summarizeWithheldLedger(result: unknown): {
   lines: string[];
 } {
   const ledger = storedLedger(result);
-  const total = ledger?.length ?? Number((result as { withheld?: unknown })?.withheld ?? 0);
-  if (!ledger) return { recorded: false, total, byCause: {}, byReason: {}, lines: [] };
+  const total =
+    ledger?.length ?? Number((result as { withheld?: unknown })?.withheld ?? 0);
+  if (!ledger)
+    return { recorded: false, total, byCause: {}, byReason: {}, lines: [] };
   const byCause: Record<string, number> = {};
   const byReason: Record<string, number> = {};
   for (const entry of ledger) {
@@ -189,7 +210,9 @@ export function summarizeWithheldLedger(result: unknown): {
       entry.evidenceStatus ? `evidence=${entry.evidenceStatus}` : "",
       entry.unknown ? `unknown=${entry.unknown}` : "",
       entry.feature ? `feature=${entry.feature}` : "",
-      entry.sources?.length ? `chunks=${entry.sources.map((item) => item.chunkId).join(",")}` : "",
+      entry.sources?.length
+        ? `chunks=${entry.sources.map((item) => item.chunkId).join(",")}`
+        : "",
       entry.replacedByNeutral ? "replaced=neutral" : "",
       entry.excerpt ? `excerpt=${JSON.stringify(entry.excerpt)}` : "",
     ]

@@ -39,7 +39,8 @@ export function parseAskRelayArgs(args: string[]): AskRelayCommand {
 }
 
 export function previewOutput(states: ResearchDocumentIndexState[]): string {
-  if (!states.length) return "No research documents are saved for this prospect.";
+  if (!states.length)
+    return "No research documents are saved for this prospect.";
   return states
     .map(
       (state) =>
@@ -71,7 +72,10 @@ export function askOutput(result: AskRelayResult): string {
       lines.push("(The model's citations did not match the retrieved text.)");
   }
   if (result.retrieved.length) {
-    lines.push("", `Retrieved ${result.retrieved.length} chunks by vector similarity:`);
+    lines.push(
+      "",
+      `Retrieved ${result.retrieved.length} chunks by vector similarity:`,
+    );
     for (const chunk of result.retrieved)
       lines.push(
         `  [${chunk.sourceId}] ${chunk.similarity.toFixed(3)}  ${chunk.sourceUrl}`,

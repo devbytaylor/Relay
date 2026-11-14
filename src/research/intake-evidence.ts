@@ -43,7 +43,9 @@ export const joinedWordCount = (value: string) =>
 // is an ordinary sentence for every other claim.
 const isListLike = (value: string, commas = false) => {
   const segments = lintable(value)
-    .split(commas ? /\s*[|;•·]\s*|\s+\/\s+|\n+|,\s*/ : /\s*[|;•·]\s*|\s+\/\s+|\n+/)
+    .split(
+      commas ? /\s*[|;•·]\s*|\s+\/\s+|\n+|,\s*/ : /\s*[|;•·]\s*|\s+\/\s+|\n+/,
+    )
     .map((segment) => segment.trim().replace(/^[-*•·]\s+|^\d+[.)]\s+/, ""))
     .filter(Boolean);
   return (
@@ -52,17 +54,23 @@ const isListLike = (value: string, commas = false) => {
     segments.filter((segment) => !/[:\d@]/.test(segment)).length >= 3
   );
 };
-export const isUiFragment = (value: string) => joinedWordCount(value) >= 2 || isListLike(value);
+export const isUiFragment = (value: string) =>
+  joinedWordCount(value) >= 2 || isListLike(value);
 
 // A statement the business wrote: a sentence of at least five words, or a heading of at least
 // three, that is not a question and not a list. A label, an option, or a menu item is not one.
 // High-stakes claims (emergency service, a fit signal) must come from a statement, which defeats
 // option lists however they are laid out (separate lines, bullets, pipes, blank lines).
 export function isStatement(sentence: string): boolean {
-  const text = lintable(sentence).trim().replace(/^[-*•·]\s+|^\d+[.)]\s+/, "");
+  const text = lintable(sentence)
+    .trim()
+    .replace(/^[-*•·]\s+|^\d+[.)]\s+/, "");
   if (!text || /\?["')\]]*$/.test(text) || isListLike(text, true)) return false;
   const heading = /^#{1,6}\s+/.test(text);
-  const words = text.replace(/^#{1,6}\s+/, "").split(/\s+/).filter(Boolean);
+  const words = text
+    .replace(/^#{1,6}\s+/, "")
+    .split(/\s+/)
+    .filter(Boolean);
   return heading ? words.length >= 3 : words.length >= 5;
 }
 
@@ -79,25 +87,41 @@ const telLinkDials = (label: string, target: string): boolean => {
   if (!TEL_LABEL.test(label.trim()) || !TEL_TARGET.test(target)) return false;
   const shown = digitsOf(label);
   const dialed = digitsOf(target);
-  const national = shown.length === 10 ? shown : shown.length === 11 && shown.startsWith("1") ? shown.slice(1) : null;
+  const national =
+    shown.length === 10
+      ? shown
+      : shown.length === 11 && shown.startsWith("1")
+        ? shown.slice(1)
+        : null;
   // The "+1" country code, or a bare national number. "+7325..." is another country's number.
-  return national !== null && (dialed === `1${national}` || (dialed === national && !target.startsWith("+")));
+  return (
+    national !== null &&
+    (dialed === `1${national}` ||
+      (dialed === national && !target.startsWith("+")))
+  );
 };
 // Link syntax is matched after NFKC, so a full-width scheme or digits cannot hide a mismatch.
 export const resolveTelLinks = (value: string): string => {
   const text = value.normalize("NFKC");
   if (!/tel:/i.test(text)) return value;
-  return text.replace(TEL_LINK, (link, label: string, target: string) => (telLinkDials(label, target) ? label.trim() : link));
+  return text.replace(TEL_LINK, (link, label: string, target: string) =>
+    telLinkDials(label, target) ? label.trim() : link,
+  );
 };
 // True when text still holds a telephone link or scheme after resolving: one that does not dial
 // the number it shows.
-export const hasUnresolvedTel = (value: string): boolean => /\btel:/i.test(resolveTelLinks(value));
+export const hasUnresolvedTel = (value: string): boolean =>
+  /\btel:/i.test(resolveTelLinks(value));
 // True when a telephone link in the source presents this number but does not plainly dial it. A
 // label with extra words ("Call 732-551-7848") is fine so long as the link dials that number.
-export function phoneNumberContradicted(source: string, number: string): boolean {
+export function phoneNumberContradicted(
+  source: string,
+  number: string,
+): boolean {
   const wanted = digitsOf(number);
   for (const match of source.normalize("NFKC").matchAll(TEL_LINK)) {
-    const dialsIt = TEL_TARGET.test(match[2]!) && digitsOf(match[2]!).endsWith(wanted);
+    const dialsIt =
+      TEL_TARGET.test(match[2]!) && digitsOf(match[2]!).endsWith(wanted);
     if (digitsOf(match[1]!).includes(wanted) && !dialsIt) return true;
   }
   return false;
@@ -108,15 +132,20 @@ export function phoneNumberContradicted(source: string, number: string): boolean
 const WEBSITE_LINK = /\[([^\[\]\r\n]+)\]\(https?:\/\/[^\s()]+\)/gi;
 // What a person should read for a stored quote: complete website links and verified telephone
 // links show their label. Nothing else is interpreted, and the result is still escaped as text.
-export const readableQuote = (value: string): string => resolveTelLinks(value).replace(WEBSITE_LINK, "$1");
+export const readableQuote = (value: string): string =>
+  resolveTelLinks(value).replace(WEBSITE_LINK, "$1");
 const stripMarkup = (value: string) =>
   resolveTelLinks(lintable(value))
     .replace(WEBSITE_LINK, "$1")
     .replace(/[“”]/g, '"')
     .replace(/[*_`\[\]]/g, "")
     .replace(/[ \t]+/g, " ");
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const isLabelLine = (line: string) => line.trim().length > 0 && line.trim().length <= 40 && !/[.!?]$/.test(line.trim());
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const isLabelLine = (line: string) =>
+  line.trim().length > 0 &&
+  line.trim().length <= 40 &&
+  !/[.!?]$/.test(line.trim());
 
 // One place a quote occurs in its stored source. sentence is the sentence or line it sits in
 // (what a statement test looks at); scope is that plus the label or heading line just above it
@@ -129,9 +158,16 @@ const MAX_WINDOW = 600;
 // outside the quote: a shortened, re-cased, or re-punctuated quote is found all the same. Null
 // when the quote cannot be found (the caller then treats the evidence as ambiguous, never as
 // supported).
-export function enclosingText(source: string, quote: string): Occurrence[] | null {
+export function enclosingText(
+  source: string,
+  quote: string,
+): Occurrence[] | null {
   const text = stripMarkup(source);
-  const words = stripMarkup(quote).trim().replace(/[.!?]+$/, "").split(/\s+/).filter(Boolean);
+  const words = stripMarkup(quote)
+    .trim()
+    .replace(/[.!?]+$/, "")
+    .split(/\s+/)
+    .filter(Boolean);
   if (!words.length) return null;
   const pattern = new RegExp(words.map(escapeRegExp).join("\\s+"), "gi");
   const lines = text.split("\n");
@@ -141,14 +177,22 @@ export function enclosingText(source: string, quote: string): Occurrence[] | nul
     const start = match.index!;
     const end = start + match[0].length;
     let left = 0;
-    for (const boundary of text.slice(0, start).matchAll(/[.!?]\s|\n/g)) left = boundary.index! + boundary[0].length;
+    for (const boundary of text.slice(0, start).matchAll(/[.!?]\s|\n/g))
+      left = boundary.index! + boundary[0].length;
     const next = /[.!?](?=\s|$)|\n/.exec(text.slice(end));
-    const right = next ? end + next.index + (next[0] === "\n" ? 0 : 1) : text.length;
+    const right = next
+      ? end + next.index + (next[0] === "\n" ? 0 : 1)
+      : text.length;
     let sentence = text.slice(left, right).trim();
     // An unpunctuated run is windowed symmetrically around the quote, never from its start.
     if (sentence.length > MAX_WINDOW) {
       const center = (start + end) / 2;
-      sentence = text.slice(Math.max(left, Math.floor(center - MAX_WINDOW / 2)), Math.min(right, Math.ceil(center + MAX_WINDOW / 2))).trim();
+      sentence = text
+        .slice(
+          Math.max(left, Math.floor(center - MAX_WINDOW / 2)),
+          Math.min(right, Math.ceil(center + MAX_WINDOW / 2)),
+        )
+        .trim();
     }
     let scope = sentence;
     const lineIndex = text.slice(0, start).split("\n").length - 1;
@@ -163,9 +207,18 @@ export function enclosingText(source: string, quote: string): Occurrence[] | nul
     if (!sentence.includes("\n") && isLabelLine(sentence)) {
       let from = lineIndex;
       let to = lineIndex;
-      while (from > 0 && lineIndex - from < 6 && isLabelLine(lines[from - 1]!)) from--;
-      while (to < lines.length - 1 && to - lineIndex < 6 && isLabelLine(lines[to + 1]!)) to++;
-      scope = lines.slice(from, to + 1).join("\n").trim();
+      while (from > 0 && lineIndex - from < 6 && isLabelLine(lines[from - 1]!))
+        from--;
+      while (
+        to < lines.length - 1 &&
+        to - lineIndex < 6 &&
+        isLabelLine(lines[to + 1]!)
+      )
+        to++;
+      scope = lines
+        .slice(from, to + 1)
+        .join("\n")
+        .trim();
     }
     found.push({ sentence, scope });
   }
@@ -205,7 +258,9 @@ export const containsInternalId = (value: string) =>
   /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/i.test(value);
 // Model prose is withheld when it echoes instructions, carries links or markup,
 // or leaks an internal identifier.
-export const suspiciousTextReason = (value: string): "instruction_like" | "markup_or_link" | "internal_id" | null =>
+export const suspiciousTextReason = (
+  value: string,
+): "instruction_like" | "markup_or_link" | "internal_id" | null =>
   isInstructionLike(value)
     ? "instruction_like"
     : MARKUP_OR_LINK.test(lintable(value))
@@ -213,10 +268,13 @@ export const suspiciousTextReason = (value: string): "instruction_like" | "marku
       : containsInternalId(value)
         ? "internal_id"
         : null;
-export const isSuspiciousText = (value: string) => suspiciousTextReason(value) !== null;
+export const isSuspiciousText = (value: string) =>
+  suspiciousTextReason(value) !== null;
 
-const ROUND_THE_CLOCK = /\b24\s*[\/-]\s*7\b|\b24[- ]hours?\b|\baround the clock\b|\bround[- ]the[- ]clock\b/i;
-const PHONE_WORDS = /\b(?:calls?|phones?|telephone|answer(?:s|ed|ing)?|dispatch\w*|line)\b/i;
+const ROUND_THE_CLOCK =
+  /\b24\s*[\/-]\s*7\b|\b24[- ]hours?\b|\baround the clock\b|\bround[- ]the[- ]clock\b/i;
+const PHONE_WORDS =
+  /\b(?:calls?|phones?|telephone|answer(?:s|ed|ing)?|dispatch\w*|line)\b/i;
 
 const URGENCY_OPTIONS = [
   /\burgent\b/i,
@@ -230,15 +288,21 @@ const URGENCY_OPTIONS = [
 // A phone number is a 10-digit number, or a 7-digit one that follows a word like "call". Numbers
 // labelled as a fax, invoice, licence, permit, or reference are not the business's phone line.
 const PHONE_GLOBAL = /(?<![\w-])(?:\(\d{3}\)\s?|\d{3}[-. ])?\d{3}[-. ]\d{4}\b/g;
-const NOT_A_PHONE_LABEL = /\b(?:fax|invoice|licen[sc]e|permit|ref(?:erence)?|order|account|acct|id|serial|model|part|lic)\b[\s:#.-]{0,3}$/i;
-const CALL_WORD_BEFORE = /\b(?:call|phone|tel(?:ephone)?|text|dial)\b[^.\n]{0,40}$/i;
+const NOT_A_PHONE_LABEL =
+  /\b(?:fax|invoice|licen[sc]e|permit|ref(?:erence)?|order|account|acct|id|serial|model|part|lic)\b[\s:#.-]{0,3}$/i;
+const CALL_WORD_BEFORE =
+  /\b(?:call|phone|tel(?:ephone)?|text|dial)\b[^.\n]{0,40}$/i;
 export const findPhoneNumber = (raw: string): string | null => {
   // Typographic hyphens and dashes are ordinary separators in a phone number.
   const value = raw.replace(/[‐‑‒–—−]/g, "-");
   for (const match of value.matchAll(PHONE_GLOBAL)) {
     const before = value.slice(Math.max(0, match.index! - 60), match.index!);
     if (NOT_A_PHONE_LABEL.test(before)) continue;
-    if (match[0].replace(/\D/g, "").length >= 10 || CALL_WORD_BEFORE.test(before)) return match[0];
+    if (
+      match[0].replace(/\D/g, "").length >= 10 ||
+      CALL_WORD_BEFORE.test(before)
+    )
+      return match[0];
   }
   return null;
 };
@@ -281,7 +345,13 @@ const FORM_SUBMIT_LABEL =
 export function showsRequestFormFields(quote: string): boolean {
   const lines = lintable(quote)
     .split(/\r?\n/)
-    .map((line) => line.trim().replace(/\s*\((?:optional|required)[^)]*\)\s*$/i, "").replace(/\s*[*]+$/, "").trim())
+    .map((line) =>
+      line
+        .trim()
+        .replace(/\s*\((?:optional|required)[^)]*\)\s*$/i, "")
+        .replace(/\s*[*]+$/, "")
+        .trim(),
+    )
     .filter(Boolean);
   const fields = new Set<number>();
   for (const line of lines) {
@@ -321,7 +391,8 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     label: "Phone number listed",
     // A quote holding a telephone link that does not dial the number it shows is not evidence of either.
     shows: (q) => findPhoneNumber(q) !== null && !hasUnresolvedTel(q),
-    statement: (q) => `The website lists the phone number ${findPhoneNumber(q)}.`,
+    statement: (q) =>
+      `The website lists the phone number ${findPhoneNumber(q)}.`,
     plain: () => "The website lists a phone number.",
   },
   {
@@ -329,7 +400,8 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     category: "phone_intake",
     label: "Business hours listed",
     shows: (q) => BUSINESS_HOURS.test(q),
-    statement: (q) => `The website lists business hours: "${BUSINESS_HOURS.exec(q)![0].trim()}".`,
+    statement: (q) =>
+      `The website lists business hours: "${BUSINESS_HOURS.exec(q)![0].trim()}".`,
     plain: () => "The website lists business hours.",
   },
   {
@@ -337,16 +409,22 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     category: "website_forms",
     label: "Contact or request form offered",
     shows: (q) =>
-      /\b(?:contact|request|inquiry|enquiry|service request|quote request)\s+form\b|\bfill out (?:our|the|a) (?:online )?form\b|\bsubmit (?:a |the |your )?(?:request|form)\b/i.test(q),
-    statement: () => "The website offers a form for contacting the business or requesting service.",
+      /\b(?:contact|request|inquiry|enquiry|service request|quote request)\s+form\b|\bfill out (?:our|the|a) (?:online )?form\b|\bsubmit (?:a |the |your )?(?:request|form)\b/i.test(
+        q,
+      ),
+    statement: () =>
+      "The website offers a form for contacting the business or requesting service.",
   },
   {
     id: "quote_request_offered",
     category: "website_forms",
     label: "Quote or estimate request offered",
     shows: (q) =>
-      /\brequest (?:a |an )?(?:free )?(?:quote|estimate)\b|\bget (?:a |an |your )?(?:free )?(?:quote|estimate)\b|\bfree (?:quotes?|estimates?)\b/i.test(q),
-    statement: () => "The website invites visitors to request a quote or estimate.",
+      /\brequest (?:a |an )?(?:free )?(?:quote|estimate)\b|\bget (?:a |an |your )?(?:free )?(?:quote|estimate)\b|\bfree (?:quotes?|estimates?)\b/i.test(
+        q,
+      ),
+    statement: () =>
+      "The website invites visitors to request a quote or estimate.",
   },
   {
     id: "service_request_offered",
@@ -355,7 +433,8 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     // The business must say it in a sentence; a button or link label is a call to action, not an offer.
     requiresStatement: true,
     shows: (q) => SERVICE_REQUEST_OFFER.test(q),
-    statement: () => "The website invites visitors to send a service request through the site.",
+    statement: () =>
+      "The website invites visitors to send a service request through the site.",
   },
   {
     id: "request_form_fields_shown",
@@ -365,7 +444,8 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     // Hedges ("coming soon") near the fields still make it Unconfirmed.
     shows: showsRequestFormFields,
     uiOption: true,
-    statement: () => "The website shows a request form with fields for the visitor's details and a submit button.",
+    statement: () =>
+      "The website shows a request form with fields for the visitor's details and a submit button.",
   },
   {
     id: "form_urgency_selector_offered",
@@ -373,18 +453,22 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     label: "Form urgency selector offered",
     // Options such as "Urgent / call today" show that a request form asks how soon
     // service is needed. They do not show that the business offers emergency service.
-    shows: (q) => URGENCY_OPTIONS.filter((option) => option.test(q)).length >= 3,
+    shows: (q) =>
+      URGENCY_OPTIONS.filter((option) => option.test(q)).length >= 3,
     uiOption: true,
     hedgeExempt: true,
     requiresUi: true,
-    statement: () => "The website's request form lets visitors say how soon they need service.",
+    statement: () =>
+      "The website's request form lets visitors say how soon they need service.",
   },
   {
     id: "online_booking_offered",
     category: "online_booking",
     label: "Online booking or scheduling offered",
     shows: (q) =>
-      /\bonline (?:booking|scheduling|appointments?|schedule)\b|\b(?:book|schedule)(?: an? \w+)? online\b|\bbook now\b|\bschedule now\b/i.test(q),
+      /\bonline (?:booking|scheduling|appointments?|schedule)\b|\b(?:book|schedule)(?: an? \w+)? online\b|\bbook now\b|\bschedule now\b/i.test(
+        q,
+      ),
     partial: (q) => /\b(?:book|schedul)\w*/i.test(q),
     statement: () => "The website offers online booking or scheduling.",
   },
@@ -404,7 +488,8 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     // Emergency service or 24/7 alone does not say that calls are answered.
     shows: (q) => ROUND_THE_CLOCK.test(q) && PHONE_WORDS.test(q),
     partial: (q) => ROUND_THE_CLOCK.test(q),
-    statement: () => "The website states that phone calls are answered around the clock.",
+    statement: () =>
+      "The website states that phone calls are answered around the clock.",
   },
   {
     id: "after_hours_availability_stated",
@@ -412,16 +497,22 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     category: "after_hours",
     label: "After-hours or weekend availability stated",
     shows: (q) =>
-      /\b(?:after[- ]hours|evenings?|weekends?|nights?|holidays?)\b[^.\n]*\b(?:available|open|service|appointments?|calls?)\b|\b(?:open|available|service)\b[^.\n]*\b(?:after[- ]hours|evenings?|weekends?|nights?|holidays?)\b/i.test(q),
-    statement: () => "The website states after-hours, evening, or weekend availability.",
+      /\b(?:after[- ]hours|evenings?|weekends?|nights?|holidays?)\b[^.\n]*\b(?:available|open|service|appointments?|calls?)\b|\b(?:open|available|service)\b[^.\n]*\b(?:after[- ]hours|evenings?|weekends?|nights?|holidays?)\b/i.test(
+        q,
+      ),
+    statement: () =>
+      "The website states after-hours, evening, or weekend availability.",
   },
   {
     id: "callback_offered",
     category: "follow_up",
     label: "Callback or contact-back stated",
     shows: (q) =>
-      /\bcall(?:s)? you back\b|\bcall-?back\b|\bwe(?:'ll| will) (?:call|contact|get back to|reach out to) you\b/i.test(q),
-    statement: () => "The website says the business will call or contact the customer back.",
+      /\bcall(?:s)? you back\b|\bcall-?back\b|\bwe(?:'ll| will) (?:call|contact|get back to|reach out to) you\b/i.test(
+        q,
+      ),
+    statement: () =>
+      "The website says the business will call or contact the customer back.",
   },
   {
     id: "response_commitment_stated",
@@ -430,7 +521,8 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     shows: (q) => RESPONSE_WINDOW.test(q),
     statement: (q) =>
       `The website states a response commitment of "${RESPONSE_WINDOW.exec(q)![0].trim()}" (the business's own statement, not measured performance).`,
-    plain: () => "The website states a response commitment (the business's own statement, not measured performance).",
+    plain: () =>
+      "The website states a response commitment (the business's own statement, not measured performance).",
   },
   {
     id: "customer_portal_offered",
@@ -443,21 +535,23 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     id: "online_payment_offered",
     category: "crm_integrations",
     label: "Online payment offered",
-    shows: (q) => /\bpay (?:your (?:bill|invoice) )?online\b|\bonline payments?\b/i.test(q),
+    shows: (q) =>
+      /\bpay (?:your (?:bill|invoice) )?online\b|\bonline payments?\b/i.test(q),
     statement: () => "The website offers online payment.",
   },
 ];
-export const OBSERVATION_TYPE_IDS = OBSERVATION_TYPES.map((type) => type.id) as [
-  string,
-  ...string[],
-];
+export const OBSERVATION_TYPE_IDS = OBSERVATION_TYPES.map(
+  (type) => type.id,
+) as [string, ...string[]];
 export const observationType = (id: string): ObservationType | undefined =>
   OBSERVATION_TYPES.find((type) => type.id === id);
 
 // Where each quote occurs in its stored source (see enclosingText). A plain string stands for
 // an occurrence whose sentence and scope are both that text. A null entry means the quote could
 // not be found in its source, so nothing about it can be called supported.
-export type QuoteContexts = readonly (readonly (string | Occurrence)[] | null)[];
+export type QuoteContexts = readonly (
+  readonly (string | Occurrence)[] | null
+)[];
 export type JudgeFlags = {
   allowUi?: boolean | undefined;
   requiresUi?: boolean | undefined;
@@ -474,13 +568,22 @@ export function judgeQuote(
   flags: JudgeFlags,
 ): Support {
   if (occurrences === null) return "ambiguous";
-  const found = (occurrences ?? [quote]).map((item) => (typeof item === "string" ? { sentence: item, scope: item } : item));
-  if (flags.requiresUi) return found.some((item) => isUiFragment(item.scope)) ? "supported" : "unsupported";
+  const found = (occurrences ?? [quote]).map((item) =>
+    typeof item === "string" ? { sentence: item, scope: item } : item,
+  );
+  if (flags.requiresUi)
+    return found.some((item) => isUiFragment(item.scope))
+      ? "supported"
+      : "unsupported";
   const clean = found.filter(
-    (item) => (flags.allowUi || !isUiFragment(item.scope)) && (!flags.requiresStatement || isStatement(item.sentence)),
+    (item) =>
+      (flags.allowUi || !isUiFragment(item.scope)) &&
+      (!flags.requiresStatement || isStatement(item.sentence)),
   );
   if (!clean.length) return "ambiguous";
-  const hedged = !flags.hedgeExempt && (quoteIsHedged(quote) || found.some((item) => quoteIsHedged(item.scope)));
+  const hedged =
+    !flags.hedgeExempt &&
+    (quoteIsHedged(quote) || found.some((item) => quoteIsHedged(item.scope)));
   return hedged ? "ambiguous" : "supported";
 }
 
@@ -492,9 +595,13 @@ export function observationSupport(
   contexts?: QuoteContexts,
 ): Support {
   const normalized = quotes.map(normalizeScraped);
-  const showing = normalized.flatMap((quote, index) => (type.shows(quote) ? [index] : []));
+  const showing = normalized.flatMap((quote, index) =>
+    type.shows(quote) ? [index] : [],
+  );
   if (!showing.length)
-    return normalized.some((quote) => type.partial?.(quote)) ? "ambiguous" : "unsupported";
+    return normalized.some((quote) => type.partial?.(quote))
+      ? "ambiguous"
+      : "unsupported";
   const verdicts = showing.map((index) =>
     judgeQuote(quotes[index]!, contexts ? contexts[index] : undefined, {
       allowUi: type.uiOption,
@@ -504,35 +611,98 @@ export function observationSupport(
     }),
   );
   // Any one quote that stands on its own is enough; a weaker quote beside it changes nothing.
-  return verdicts.includes("supported") ? "supported" : verdicts.includes("ambiguous") ? "ambiguous" : "unsupported";
+  return verdicts.includes("supported")
+    ? "supported"
+    : verdicts.includes("ambiguous")
+      ? "ambiguous"
+      : "unsupported";
 }
 
 // The wording comes from the first quote that shows the claim on its own. A value is taken from
 // the stored quote verbatim; if only the normalized copy matches, the wording carries no value.
-export function observationStatement(type: ObservationType, quotes: readonly string[]): string {
+export function observationStatement(
+  type: ObservationType,
+  quotes: readonly string[],
+): string {
   const raw = quotes.find((quote) => type.shows(quote));
   if (raw) return type.statement(raw);
-  const normalized = quotes.map(normalizeScraped).find((quote) => type.shows(quote));
-  return normalized && type.plain ? type.plain() : type.statement(normalized ?? normalizeScraped(quotes.join("\n")));
+  const normalized = quotes
+    .map(normalizeScraped)
+    .find((quote) => type.shows(quote));
+  return normalized && type.plain
+    ? type.plain()
+    : type.statement(normalized ?? normalizeScraped(quotes.join("\n")));
 }
 
 // Operational unknowns, from the original UNKNOWN STANDARD. The model selects
 // ids; the server writes the text, so an unknown can never smuggle in a claim.
 export const UNKNOWN_TOPICS = [
-  { id: "first_to_see_request", text: "Who sees a request first", phrase: "who sees a request first" },
-  { id: "request_assignment", text: "How requests are assigned", phrase: "how requests are assigned" },
-  { id: "forms_calls_same_system", text: "Whether forms and calls enter the same system", phrase: "whether forms and calls enter the same system" },
-  { id: "urgent_identification", text: "How urgent inquiries are identified", phrase: "how urgent inquiries are identified" },
-  { id: "after_hours_handling", text: "What happens after hours", phrase: "what happens after hours" },
-  { id: "failed_callback_tracking", text: "How failed callbacks are tracked", phrase: "how failed callbacks are tracked" },
-  { id: "followup_ownership", text: "Who owns follow-up", phrase: "who owns follow-up" },
-  { id: "open_estimate_tracking", text: "How open estimates are tracked", phrase: "how open estimates are tracked" },
-  { id: "location_intake_sharing", text: "Whether multiple locations share one intake process", phrase: "whether multiple locations share one intake process" },
-  { id: "response_time", text: "Response time", phrase: "what the response time is" },
+  {
+    id: "first_to_see_request",
+    text: "Who sees a request first",
+    phrase: "who sees a request first",
+  },
+  {
+    id: "request_assignment",
+    text: "How requests are assigned",
+    phrase: "how requests are assigned",
+  },
+  {
+    id: "forms_calls_same_system",
+    text: "Whether forms and calls enter the same system",
+    phrase: "whether forms and calls enter the same system",
+  },
+  {
+    id: "urgent_identification",
+    text: "How urgent inquiries are identified",
+    phrase: "how urgent inquiries are identified",
+  },
+  {
+    id: "after_hours_handling",
+    text: "What happens after hours",
+    phrase: "what happens after hours",
+  },
+  {
+    id: "failed_callback_tracking",
+    text: "How failed callbacks are tracked",
+    phrase: "how failed callbacks are tracked",
+  },
+  {
+    id: "followup_ownership",
+    text: "Who owns follow-up",
+    phrase: "who owns follow-up",
+  },
+  {
+    id: "open_estimate_tracking",
+    text: "How open estimates are tracked",
+    phrase: "how open estimates are tracked",
+  },
+  {
+    id: "location_intake_sharing",
+    text: "Whether multiple locations share one intake process",
+    phrase: "whether multiple locations share one intake process",
+  },
+  {
+    id: "response_time",
+    text: "Response time",
+    phrase: "what the response time is",
+  },
   { id: "lead_volume", text: "Lead volume", phrase: "what the lead volume is" },
-  { id: "booking_rate", text: "Booking rate", phrase: "what the booking rate is" },
-  { id: "crm_usage", text: "CRM usage", phrase: "whether and how a CRM is used" },
-  { id: "economic_value", text: "Economic value", phrase: "what the economic value is" },
+  {
+    id: "booking_rate",
+    text: "Booking rate",
+    phrase: "what the booking rate is",
+  },
+  {
+    id: "crm_usage",
+    text: "CRM usage",
+    phrase: "whether and how a CRM is used",
+  },
+  {
+    id: "economic_value",
+    text: "Economic value",
+    phrase: "what the economic value is",
+  },
 ] as const;
 export type UnknownId = (typeof UNKNOWN_TOPICS)[number]["id"];
 export const UNKNOWN_IDS = UNKNOWN_TOPICS.map((topic) => topic.id) as [
@@ -546,7 +716,10 @@ const unknownPhrase = (id: UnknownId): string =>
 // The original HYPOTHESIS STANDARD as a template: observed public evidence plus an
 // operational unknown is a discovery opportunity. The server writes the sentence, so
 // it cannot carry a claim, an identifier, or text from a website.
-export const composeHypothesis = (observed: string, unknown: UnknownId): string =>
+export const composeHypothesis = (
+  observed: string,
+  unknown: UnknownId,
+): string =>
   `${observed.replace(/\.$/, "")}, so it may be worth understanding ${unknownPhrase(unknown)}.`;
 export const unknownText = (id: UnknownId): string => {
   const topic = UNKNOWN_TOPICS.find((item) => item.id === id)!;
@@ -568,11 +741,17 @@ export const QUESTION_FEATURES: readonly {
     feature: "a website form or online request",
     mentions:
       /\bforms?\b|\bsubmit\w*|\bfill(?:s|ed|ing)? out\b|\b(?:web ?site|online|web) (?:service |repair |appointment )?(?:request|inquiry|enquiry|quote|submission|lead|message)s?\b|\b(?:request|inquiry|enquiry|quote|submission|lead|message|booking)s?\b[^?]{0,40}\b(?:through|via|from|on|using) (?:the |your |our |a )?(?:web ?site|site|web|online)\b|\b(?:through|via|using|by way of) (?:the |your |our |a )?(?:web ?site|site|online)\b/i,
-    shownBy: ["contact_form_offered", "service_request_offered", "request_form_fields_shown", "form_urgency_selector_offered"],
+    shownBy: [
+      "contact_form_offered",
+      "service_request_offered",
+      "request_form_fields_shown",
+      "form_urgency_selector_offered",
+    ],
   },
   {
     feature: "online booking",
-    mentions: /\bbook(?:s|ed|ing)?\b[^?]{0,30}\bonline\b|\bonline (?:booking|scheduling|appointments?|scheduler)\b|\bschedul\w*[^?]{0,30}\bonline\b|\bbooking (?:link|page|calendar|system|tool)\b/i,
+    mentions:
+      /\bbook(?:s|ed|ing)?\b[^?]{0,30}\bonline\b|\bonline (?:booking|scheduling|appointments?|scheduler)\b|\bschedul\w*[^?]{0,30}\bonline\b|\bbooking (?:link|page|calendar|system|tool)\b/i,
     shownBy: ["online_booking_offered"],
   },
   {
@@ -582,16 +761,24 @@ export const QUESTION_FEATURES: readonly {
   },
   {
     feature: "online payment",
-    mentions: /\bpay(?:s|ing|ment)?\b[^?]{0,20}\bonline\b|\bonline payments?\b/i,
+    mentions:
+      /\bpay(?:s|ing|ment)?\b[^?]{0,20}\bonline\b|\bonline payments?\b/i,
     shownBy: ["online_payment_offered"],
   },
 ];
 
 // The first website feature the question names that no accepted observation shows, or null.
-export function ungroundedQuestionFeature(question: string, acceptedTypes: ReadonlySet<string>): string | null {
+export function ungroundedQuestionFeature(
+  question: string,
+  acceptedTypes: ReadonlySet<string>,
+): string | null {
   const text = lintable(question);
   for (const item of QUESTION_FEATURES)
-    if (item.mentions.test(text) && !item.shownBy.some((type) => acceptedTypes.has(type))) return item.feature;
+    if (
+      item.mentions.test(text) &&
+      !item.shownBy.some((type) => acceptedTypes.has(type))
+    )
+      return item.feature;
   return null;
 }
 

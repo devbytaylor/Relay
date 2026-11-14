@@ -10,6 +10,12 @@ import {
   type ResearchTextChunk,
 } from "../research/research-chunker.js";
 
+// 1. Loads the prospect's saved website documents.
+// 2. Calls chunkResearchMarkdown() on each document.
+// 3. Checks whether chunks were already stored and embedded.
+// 4. Sends missing chunks to OpenAI in batches of up to 64.
+// 5. Saves the chunks, embeddings, model name, and source information in PostgreSQL.
+
 type Database = Pick<Pool, "query">;
 
 type DocumentRow = { id: string; source_url: string; content: string };
@@ -201,7 +207,9 @@ export async function indexProspectResearch(
       // Recheck under the lock: another run may have embedded chunks since.
       const stored = await loadChunks(document.id, id, client);
       chunksToEmbed(planned, stored, document.id);
-      const byIndex = new Map(stored.map((chunk) => [chunk.chunk_index, chunk]));
+      const byIndex = new Map(
+        stored.map((chunk) => [chunk.chunk_index, chunk]),
+      );
 
       let count = 0;
       for (const [position, chunk] of missing.entries()) {
@@ -268,9 +276,14 @@ export async function listDashboardProspects(
   database: Database,
 ): Promise<DashboardProspect[]> {
   const result = await database.query<{
-    id: string; company_name: string; website: string | null;
-    industry: string | null; contact_name: string | null;
-    contact_email: string | null; stage: string; embedded_chunks: number;
+    id: string;
+    company_name: string;
+    website: string | null;
+    industry: string | null;
+    contact_name: string | null;
+    contact_email: string | null;
+    stage: string;
+    embedded_chunks: number;
     website_index_status: string | null;
     website_index_has_evidence: boolean;
     website_research_request_id: string | null;
@@ -300,9 +313,13 @@ export async function listDashboardProspects(
     [RESEARCH_EMBEDDING_MODEL],
   );
   return result.rows.map((row) => ({
-    id: row.id, companyName: row.company_name, website: row.website,
-    industry: row.industry, contactName: row.contact_name,
-    contactEmail: row.contact_email, stage: row.stage,
+    id: row.id,
+    companyName: row.company_name,
+    website: row.website,
+    industry: row.industry,
+    contactName: row.contact_name,
+    contactEmail: row.contact_email,
+    stage: row.stage,
     embeddedChunks: row.embedded_chunks,
     websiteIndexStatus: row.website_index_status,
     websiteIndexHasEvidence: row.website_index_has_evidence,
@@ -425,7 +442,9 @@ export async function searchResearchChunksByKeyword(
   const prospectId = prospectUuid(input.prospectId);
   if (!input.query.trim() || input.query.length > 500)
     throw new Error("Keyword query must be 1 to 500 characters.");
-  const phrases = [...input.query.matchAll(/"[^"]+"/g)].map((match) => match[0]).join(" or ");
+  const phrases = [...input.query.matchAll(/"[^"]+"/g)]
+    .map((match) => match[0])
+    .join(" or ");
   if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)
     throw new Error("Search limit must be between 1 and 20.");
   const result = await database.query<{
@@ -445,7 +464,13 @@ export async function searchResearchChunksByKeyword(
       AND to_tsvector('english', c.content) @@ q.query
     ORDER BY (to_tsvector('english', c.content) @@ p.query) DESC, rank DESC, c.source_url, c.chunk_index
     LIMIT $4`,
-    [prospectId, input.query, RESEARCH_EMBEDDING_MODEL, input.limit, phrases || input.query],
+    [
+      prospectId,
+      input.query,
+      RESEARCH_EMBEDDING_MODEL,
+      input.limit,
+      phrases || input.query,
+    ],
   );
   return result.rows.map((row) => ({
     id: row.id,

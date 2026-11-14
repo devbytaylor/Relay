@@ -1,10 +1,14 @@
-import { RESEARCH_EMBEDDING_DIMENSIONS, type Embedder } from "../../src/research/openai-embeddings.js";
+import {
+  RESEARCH_EMBEDDING_DIMENSIONS,
+  type Embedder,
+} from "../../src/research/openai-embeddings.js";
 import { ASSESSMENT_CATEGORY_IDS } from "../../src/research/openai-assessor.js";
 
 export const PHONE_QUOTE = "Call 555-0100 to reach our office.";
 export const ONLY_PHONE_QUOTE = "Call 555-0100, the only way to reach us.";
 export const FORM_QUOTE = "Request a quote with the contact form.";
-export const EMERGENCY_QUOTE = "Technicians answer emergency calls 24 hours a day.";
+export const EMERGENCY_QUOTE =
+  "Technicians answer emergency calls 24 hours a day.";
 export const FIXTURE_PAGE = [
   "# Riverbend Comfort",
   PHONE_QUOTE,
@@ -19,7 +23,8 @@ export function fakeVector(text: string): number[] {
   vector[0] = 0.001;
   for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
     let hash = 2166136261;
-    for (const character of word) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+    for (const character of word)
+      hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
     vector[1 + ((hash >>> 0) % (RESEARCH_EMBEDDING_DIMENSIONS - 1))]! += 1;
   }
   const length = Math.hypot(...vector);
@@ -54,7 +59,11 @@ export function sampleDraft(sources: readonly Source[]): RawDraft {
   const form = () => [cite(FORM_QUOTE)];
   const emergency = () => [cite(EMERGENCY_QUOTE)];
   // A hypothesis is two ids; the server composes the sentence.
-  const opportunity = (category: string, observed: string, unknown: string) => ({ category, observed, unknown });
+  const opportunity = (
+    category: string,
+    observed: string,
+    unknown: string,
+  ) => ({ category, observed, unknown });
   return {
     categories: ASSESSMENT_CATEGORY_IDS.map((category) => ({
       category,
@@ -67,21 +76,39 @@ export function sampleDraft(sources: readonly Source[]): RawDraft {
       unknowns: ["lead_volume"],
       hypotheses:
         category === "phone_intake"
-          ? [{ observed: "phone_number_listed", unknown: "first_to_see_request" }]
+          ? [
+              {
+                observed: "phone_number_listed",
+                unknown: "first_to_see_request",
+              },
+            ]
           : category === "website_forms"
-            ? [{ observed: "multiple_intake_paths", unknown: "forms_calls_same_system" }]
+            ? [
+                {
+                  observed: "multiple_intake_paths",
+                  unknown: "forms_calls_same_system",
+                },
+              ]
             : category === "after_hours"
-              ? [{ observed: "emergency_service_stated", unknown: "after_hours_handling" }]
+              ? [
+                  {
+                    observed: "emergency_service_stated",
+                    unknown: "after_hours_handling",
+                  },
+                ]
               : [],
       // Names no website feature: the fixture accepts no form, booking, portal, or payment evidence.
-      discovery_questions: [`What happens next for a request tied to ${category.split("_")[0]}?`],
+      discovery_questions: [
+        `What happens next for a request tied to ${category.split("_")[0]}?`,
+      ],
     })),
     primary_opportunity_hypothesis: {
       category: "after_hours",
       observed: "emergency_service_stated",
       unknown: "forms_calls_same_system",
     },
-    primary_discovery_question: "When a customer calls, what happens from there?",
+    primary_discovery_question:
+      "When a customer calls, what happens from there?",
     preliminary_fit: {
       signals: [
         { signal: "urgent_or_emergency_service", citations: emergency() },
@@ -90,9 +117,21 @@ export function sampleDraft(sources: readonly Source[]): RawDraft {
       unknowns: ["lead_volume", "economic_value"],
     },
     top_opportunities: [
-      opportunity("after_hours", "urgent_or_emergency_service", "after_hours_handling"),
-      opportunity("website_forms", "phone_number_listed", "forms_calls_same_system"),
-      opportunity("follow_up", "emergency_service_stated", "followup_ownership"),
+      opportunity(
+        "after_hours",
+        "urgent_or_emergency_service",
+        "after_hours_handling",
+      ),
+      opportunity(
+        "website_forms",
+        "phone_number_listed",
+        "forms_calls_same_system",
+      ),
+      opportunity(
+        "follow_up",
+        "emergency_service_stated",
+        "followup_ownership",
+      ),
     ],
   };
 }

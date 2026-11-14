@@ -25,15 +25,18 @@ const reply = (body: unknown, status = 200) => ({
 
 test("Embedder sends a tool-free embedding request and returns vectors in input order", async () => {
   let request: { url: string; init: RequestInit } | undefined;
-  const embed = createOpenAIEmbedder({ OPENAI_API_KEY: "test-key" }, async (url, init) => {
-    request = { url, init };
-    return reply({
-      data: [
-        { index: 1, embedding: vector(0.2) },
-        { index: 0, embedding: vector(0.1) },
-      ],
-    });
-  });
+  const embed = createOpenAIEmbedder(
+    { OPENAI_API_KEY: "test-key" },
+    async (url, init) => {
+      request = { url, init };
+      return reply({
+        data: [
+          { index: 1, embedding: vector(0.2) },
+          { index: 0, embedding: vector(0.1) },
+        ],
+      });
+    },
+  );
   const result = await embed(["first", "second"]);
   assert.equal(result[0]![0], 0.1);
   assert.equal(result[1]![0], 0.2);
@@ -49,7 +52,9 @@ test("Embedder sends a tool-free embedding request and returns vectors in input 
 test("Embedder rejects missing keys, bad input, and mismatched responses", async () => {
   assert.throws(() => createOpenAIEmbedder({}), /OPENAI_API_KEY/);
   const embedWith = (body: unknown, status = 200) =>
-    createOpenAIEmbedder({ OPENAI_API_KEY: "k" }, async () => reply(body, status));
+    createOpenAIEmbedder({ OPENAI_API_KEY: "k" }, async () =>
+      reply(body, status),
+    );
   const ok = embedWith({ data: [{ index: 0, embedding: vector(0) }] });
   await assert.rejects(ok([]), /input is invalid/);
   await assert.rejects(ok(["  "]), /input is invalid/);
@@ -89,7 +94,11 @@ test("Answerer sends retrieved excerpts as untrusted data with a strict citation
     },
   );
   const sources = [
-    { id: "S1", sourceUrl: "https://fictional.example.com/", text: "Open daily." },
+    {
+      id: "S1",
+      sourceUrl: "https://fictional.example.com/",
+      text: "Open daily.",
+    },
   ];
   assert.equal(await answer("When are they open?", sources), '{"ok":true}');
   assert.equal(body.model, "test-model");
@@ -107,7 +116,10 @@ test("Answerer sends retrieved excerpts as untrusted data with a strict citation
     sources,
   });
 
-  assert.throws(() => createOpenAIAnswerer({ OPENAI_API_KEY: "k" }), /RELAY_RESEARCH_MODEL/);
+  assert.throws(
+    () => createOpenAIAnswerer({ OPENAI_API_KEY: "k" }),
+    /RELAY_RESEARCH_MODEL/,
+  );
   const incomplete = createOpenAIAnswerer(
     { OPENAI_API_KEY: "k", RELAY_RESEARCH_MODEL: "m" },
     async () => reply({ status: "incomplete", output: [] }),
@@ -137,7 +149,11 @@ test("Draft answers must match the schema and cite only retrieved excerpts", () 
 
 test("Citations verify only when every quote appears in its cited excerpt", () => {
   const sources = [
-    { id: "S1", sourceUrl: "https://a.example.com/", text: "We’re **open daily**\nfrom 7 AM." },
+    {
+      id: "S1",
+      sourceUrl: "https://a.example.com/",
+      text: "We’re **open daily**\nfrom 7 AM.",
+    },
     { id: "S2", sourceUrl: "https://a.example.com/b", text: "Free estimates." },
   ];
   const draft = (citations: { source: string; quote: string }[]) => ({
@@ -145,10 +161,18 @@ test("Citations verify only when every quote appears in its cited excerpt", () =
     answer: "Answer.",
     citations,
   });
-  assert.ok(citationsVerified(draft([{ source: "S1", quote: "We're open daily from 7 am" }]), sources));
+  assert.ok(
+    citationsVerified(
+      draft([{ source: "S1", quote: "We're open daily from 7 am" }]),
+      sources,
+    ),
+  );
   assert.equal(citationsVerified(draft([]), sources), false);
   // A real quote attributed to the wrong excerpt does not verify.
-  assert.equal(citationsVerified(draft([{ source: "S2", quote: "open daily" }]), sources), false);
+  assert.equal(
+    citationsVerified(draft([{ source: "S2", quote: "open daily" }]), sources),
+    false,
+  );
   // One fabricated quote fails the whole answer.
   assert.equal(
     citationsVerified(
@@ -160,36 +184,82 @@ test("Citations verify only when every quote appears in its cited excerpt", () =
     ),
     false,
   );
-  assert.equal(citationsVerified(draft([{ source: "S1", quote: "we" }]), sources), false);
+  assert.equal(
+    citationsVerified(draft([{ source: "S1", quote: "we" }]), sources),
+    false,
+  );
 });
 
 test("Rendered Markdown link labels verify without accepting invented words or URLs", () => {
-  const sources = [{
-    id: "S1",
-    sourceUrl: "https://a.example.com/",
-    text: "## Service areas\n- [North District](https://a.example.com/north)\n- [South District](https://a.example.com/south)",
-  }, {
-    id: "S2",
-    sourceUrl: "https://b.example.com/",
-    text: "Open daily.",
-  }];
+  const sources = [
+    {
+      id: "S1",
+      sourceUrl: "https://a.example.com/",
+      text: "## Service areas\n- [North District](https://a.example.com/north)\n- [South District](https://a.example.com/south)",
+    },
+    {
+      id: "S2",
+      sourceUrl: "https://b.example.com/",
+      text: "Open daily.",
+    },
+  ];
   const draft = (source: string, quote: string) => ({
     status: "answered" as const,
     answer: "They serve two areas.",
     citations: [{ source, quote }],
   });
 
-  assert.equal(citationsVerified(draft("S1", "- [North District]\n- [South District]"), sources), true);
-  assert.equal(citationsVerified(draft("S1", "- North District\n- South District"), sources), true);
-  assert.equal(citationsVerified(draft("S1", "[North District](https://a.example.com/north)"), sources), true);
-  assert.equal(citationsVerified(draft("S1", "- [North District]\n- [West District]"), sources), false);
-  assert.equal(citationsVerified(draft("S1", "[North District](https://invented.example.com/)"), sources), false);
-  assert.equal(citationsVerified(draft("S2", "- [North District]\n- [South District]"), sources), false);
+  assert.equal(
+    citationsVerified(
+      draft("S1", "- [North District]\n- [South District]"),
+      sources,
+    ),
+    true,
+  );
+  assert.equal(
+    citationsVerified(
+      draft("S1", "- North District\n- South District"),
+      sources,
+    ),
+    true,
+  );
+  assert.equal(
+    citationsVerified(
+      draft("S1", "[North District](https://a.example.com/north)"),
+      sources,
+    ),
+    true,
+  );
+  assert.equal(
+    citationsVerified(
+      draft("S1", "- [North District]\n- [West District]"),
+      sources,
+    ),
+    false,
+  );
+  assert.equal(
+    citationsVerified(
+      draft("S1", "[North District](https://invented.example.com/)"),
+      sources,
+    ),
+    false,
+  );
+  assert.equal(
+    citationsVerified(
+      draft("S2", "- [North District]\n- [South District]"),
+      sources,
+    ),
+    false,
+  );
 });
 
 test("Opt-in citation diagnostics identify the failed quote without changing the hold", () => {
   const sources = [
-    { id: "S1", sourceUrl: "https://a.example.com/", text: "Book a [free consultation](https://a.example.com/book) today." },
+    {
+      id: "S1",
+      sourceUrl: "https://a.example.com/",
+      text: "Book a [free consultation](https://a.example.com/book) today.",
+    },
     { id: "S2", sourceUrl: "https://b.example.com/", text: "Open daily." },
   ];
   const draft = {
@@ -200,16 +270,29 @@ test("Opt-in citation diagnostics identify the failed quote without changing the
       { source: "S1", quote: "Book a free consultation tomorrow." },
     ],
   };
-  const failures: Parameters<NonNullable<Parameters<typeof citationsVerified>[2]>>[0][] = [];
-  assert.equal(citationsVerified(draft, sources, (failure) => failures.push(failure)), false);
-  assert.deepEqual(failures, [{
-    citationIndex: 1,
-    sourceId: "S1",
-    reason: "quote_not_in_source",
-    quote: "Book a free consultation tomorrow.",
-    sourceContext: "book a [free consultation](https://a.example.com/book) today.",
-  }]);
-  assert.equal(citationsVerified(draft, sources, () => { throw new Error("logging failed"); }), false);
+  const failures: Parameters<
+    NonNullable<Parameters<typeof citationsVerified>[2]>
+  >[0][] = [];
+  assert.equal(
+    citationsVerified(draft, sources, (failure) => failures.push(failure)),
+    false,
+  );
+  assert.deepEqual(failures, [
+    {
+      citationIndex: 1,
+      sourceId: "S1",
+      reason: "quote_not_in_source",
+      quote: "Book a free consultation tomorrow.",
+      sourceContext:
+        "book a [free consultation](https://a.example.com/book) today.",
+    },
+  ]);
+  assert.equal(
+    citationsVerified(draft, sources, () => {
+      throw new Error("logging failed");
+    }),
+    false,
+  );
 });
 
 test("Ask Relay commands require exact arguments and explicit OpenAI confirmation", () => {
@@ -218,11 +301,22 @@ test("Ask Relay commands require exact arguments and explicit OpenAI confirmatio
     prospectId,
   });
   assert.deepEqual(
-    parseAskRelayArgs(["index", "--prospect", prospectId, "--confirm-embeddings"]),
+    parseAskRelayArgs([
+      "index",
+      "--prospect",
+      prospectId,
+      "--confirm-embeddings",
+    ]),
     { action: "index", prospectId },
   );
   assert.deepEqual(
-    parseAskRelayArgs(["ask", "--prospect", prospectId, "--confirm-openai", "Who are they?"]),
+    parseAskRelayArgs([
+      "ask",
+      "--prospect",
+      prospectId,
+      "--confirm-openai",
+      "Who are they?",
+    ]),
     { action: "ask", prospectId, question: "Who are they?" },
   );
   for (const args of [
@@ -230,20 +324,36 @@ test("Ask Relay commands require exact arguments and explicit OpenAI confirmatio
     ["index", "--prospect", prospectId],
     ["ask", "--prospect", prospectId, "Who are they?"],
     ["ask", "--prospect", "not-a-uuid", "--confirm-openai", "Who?"],
-    ["ask", "--prospect", prospectId, "--confirm-openai", "Who", "are", "they?"],
+    [
+      "ask",
+      "--prospect",
+      prospectId,
+      "--confirm-openai",
+      "Who",
+      "are",
+      "they?",
+    ],
     ["ask", "--prospect", prospectId, "--confirm-openai", "  "],
   ])
     assert.throws(() => parseAskRelayArgs(args), /Use preview/);
 });
 
 test("Answer output lists verified source URLs; insufficient output says so", () => {
-  const retrieved = [{ sourceId: "S1", sourceUrl: "https://a.example.com/", similarity: 0.5 }];
+  const retrieved = [
+    { sourceId: "S1", sourceUrl: "https://a.example.com/", similarity: 0.5 },
+  ];
   const answered = askOutput({
     question: "When?",
     status: "answered",
     reason: null,
     answer: "Daily.",
-    citations: [{ sourceId: "S1", sourceUrl: "https://a.example.com/", quote: "Open daily" }],
+    citations: [
+      {
+        sourceId: "S1",
+        sourceUrl: "https://a.example.com/",
+        quote: "Open daily",
+      },
+    ],
     retrieved,
   });
   assert.match(answered, /Sources:\n {2}\[S1\] https:\/\/a\.example\.com\//);

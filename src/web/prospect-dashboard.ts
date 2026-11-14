@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import type { DashboardProspect } from "../data/research-embeddings.js";
 import type { AssessmentHistory } from "../data/lead-assessments.js";
 import { askForm, ASK_STYLE } from "./ask-relay-pages.js";
-import { assessmentGenerating, ASSESSMENT_STYLE, renderAssessmentSection, renderIntelligenceOverview } from "./assessment-pages.js";
+import {
+  assessmentGenerating,
+  ASSESSMENT_STYLE,
+  renderAssessmentSection,
+  renderIntelligenceOverview,
+} from "./assessment-pages.js";
 import { escapeHtml } from "./intake-pages.js";
 import { safeResearchUrl } from "../research/research-evidence.js";
 import { parseWebsiteDiagnostic } from "../research/website-diagnostic.js";
@@ -57,15 +62,34 @@ function statusLabel(prospect: DashboardProspect): string {
 }
 
 function canResearch(prospect: DashboardProspect): boolean {
-  if (prospect.embeddedChunks || prospect.websiteIndexStatus || prospect.stage !== "researching" || !prospect.website) return false;
-  try { safeResearchUrl(prospect.website); return true; } catch { return false; }
+  if (
+    prospect.embeddedChunks ||
+    prospect.websiteIndexStatus ||
+    prospect.stage !== "researching" ||
+    !prospect.website
+  )
+    return false;
+  try {
+    safeResearchUrl(prospect.website);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function indexLabel(prospect: DashboardProspect): string {
-  if (prospect.embeddedChunks && (!prospect.websiteIndexStatus || prospect.websiteIndexStatus === "ready")) return "Ready";
+  if (
+    prospect.embeddedChunks &&
+    (!prospect.websiteIndexStatus || prospect.websiteIndexStatus === "ready")
+  )
+    return "Ready";
   if (prospect.websiteIndexStatus === "researching") return "Researching";
   if (prospect.websiteIndexStatus === "indexing") return "Indexing";
-  if (prospect.websiteIndexStatus === "needs_review" || prospect.websiteIndexStatus === "ready") return "Needs review";
+  if (
+    prospect.websiteIndexStatus === "needs_review" ||
+    prospect.websiteIndexStatus === "ready"
+  )
+    return "Needs review";
   return "Not researched";
 }
 
@@ -73,17 +97,26 @@ function researchExplanation(prospect: DashboardProspect): string {
   if (indexLabel(prospect) !== "Needs review") return "";
   const diagnostic = parseWebsiteDiagnostic(prospect.websiteResearchError);
   const messages = {
-    request_not_sent: "The provider request was not sent. Review the research setup before starting collection.",
-    provider_failed: "Firecrawl returned a failed response. Review the provider record before another collection.",
-    provider_uncertain: "Firecrawl's outcome is uncertain. Inspect provider activity before another collection.",
-    response_invalid: "Firecrawl responded, but its content or source could not be verified. Inspect the provider response before another collection.",
-    persistence_failed: "Website collection returned, but saving the research failed. Inspect the database checkpoint before any recovery.",
-    embedding_failed: "Saved research could not be fully indexed. Inspect the saved documents and embeddings before retrying indexing.",
+    request_not_sent:
+      "The provider request was not sent. Review the research setup before starting collection.",
+    provider_failed:
+      "Firecrawl returned a failed response. Review the provider record before another collection.",
+    provider_uncertain:
+      "Firecrawl's outcome is uncertain. Inspect provider activity before another collection.",
+    response_invalid:
+      "Firecrawl responded, but its content or source could not be verified. Inspect the provider response before another collection.",
+    persistence_failed:
+      "Website collection returned, but saving the research failed. Inspect the database checkpoint before any recovery.",
+    embedding_failed:
+      "Saved research could not be fully indexed. Inspect the saved documents and embeddings before retrying indexing.",
   };
-  const message = diagnostic ? messages[diagnostic.kind] : prospect.websiteResearchStatus === "needs_reconciliation"
-    ? "Website collection outcome is uncertain. Inspect Firecrawl activity before another collection."
-    : "Research needs inspection before it can be used.";
-  const pages = prospect.websiteSavedDocuments === 0 ? " No pages were saved." : "";
+  const message = diagnostic
+    ? messages[diagnostic.kind]
+    : prospect.websiteResearchStatus === "needs_reconciliation"
+      ? "Website collection outcome is uncertain. Inspect Firecrawl activity before another collection."
+      : "Research needs inspection before it can be used.";
+  const pages =
+    prospect.websiteSavedDocuments === 0 ? " No pages were saved." : "";
   const id = diagnostic?.requestId ?? prospect.websiteResearchRequestId;
   return `<p>${escapeHtml(message + pages)}</p>${id ? `<p class="hint">Research request ${escapeHtml(id)}${diagnostic ? ` · ${escapeHtml(diagnostic.stage)} · ${escapeHtml(diagnostic.timestamp)}` : ""}${diagnostic?.providerRequestId ? ` · Provider request ${escapeHtml(diagnostic.providerRequestId)}` : ""}${diagnostic?.httpStatus ? ` · HTTP ${diagnostic.httpStatus}` : ""}</p>` : ""}`;
 }

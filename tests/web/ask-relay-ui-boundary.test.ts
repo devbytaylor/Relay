@@ -15,7 +15,10 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const IMPORT =
   /^\s*(?:import|export)\s+(type\s)?[^;]*?\bfrom\s*["']([\w@./:-]+)["']|^\s*import\s*["']([\w@./:-]+)["']|\bimport\s*\(\s*["']([\w@./:-]+)["']\s*\)/gm;
 
-function runtimeImports(entry: string): { modules: string[]; packages: string[] } {
+function runtimeImports(entry: string): {
+  modules: string[];
+  packages: string[];
+} {
   const modules = new Set<string>();
   const packages = new Set<string>();
   const pending = [entry];
@@ -31,7 +34,10 @@ function runtimeImports(entry: string): { modules: string[]; packages: string[] 
         packages.add(specifier);
         continue;
       }
-      const target = new URL(specifier.replace(/\.js$/, ".ts"), new URL(path, `file://${root}`));
+      const target = new URL(
+        specifier.replace(/\.js$/, ".ts"),
+        new URL(path, `file://${root}`),
+      );
       pending.push(relative(root, fileURLToPath(target)));
     }
   }
@@ -75,20 +81,27 @@ test("The Ask Relay UI refuses to start against any database but the demo one", 
     "postgresql://u:p@127.0.0.1:5432/relay_demo?host=evil.example.com",
     undefined,
   ]) {
-    const result = spawnSync(process.execPath, ["--import", "tsx", `${root}scripts/run-ask-relay-ui.ts`], {
-      cwd: root,
-      encoding: "utf8",
-      // .env is never read, so the case without DATABASE_URL really has none.
-      env: {
-        ...environment,
-        DOTENV_CONFIG_PATH: "/dev/null",
-        DOTENV_CONFIG_QUIET: "true",
-        ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", `${root}scripts/run-ask-relay-ui.ts`],
+      {
+        cwd: root,
+        encoding: "utf8",
+        // .env is never read, so the case without DATABASE_URL really has none.
+        env: {
+          ...environment,
+          DOTENV_CONFIG_PATH: "/dev/null",
+          DOTENV_CONFIG_QUIET: "true",
+          ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
+        },
+        timeout: 10000,
       },
-      timeout: 10000,
-    });
+    );
     assert.equal(result.status, 1, `expected refusal for ${databaseUrl}`);
-    assert.match(result.stderr, /Ask Relay UI did not start\. .*loopback database named relay_demo/);
+    assert.match(
+      result.stderr,
+      /Ask Relay UI did not start\. .*loopback database named relay_demo/,
+    );
     assert.doesNotMatch(result.stderr, /secret-pass|neon\.tech|evil\.example/);
     assert.doesNotMatch(result.stdout, /listening/);
   }
@@ -108,5 +121,10 @@ test("The Ask Relay UI process loads only Ask Relay, page, and pg modules: never
     "src/web/ask-relay-server.ts",
     "src/web/intake-pages.ts",
   ]);
-  assert.deepEqual(packages, ["dotenv/config", "node:crypto", "node:http", "pg"]);
+  assert.deepEqual(packages, [
+    "dotenv/config",
+    "node:crypto",
+    "node:http",
+    "pg",
+  ]);
 });

@@ -35,17 +35,39 @@ const answered: AskRelayResult = {
   reason: null,
   answer: `Riverbend and Oak Hollow. ${XSS}`,
   citations: [
-    { sourceId: "S1", sourceUrl: "https://riverbend.example.com/", quote: "Riverbend" },
-    { sourceId: "S2", sourceUrl: "https://riverbend.example.com/areas", quote: `Oak ${XSS}` },
-    { sourceId: "S2", sourceUrl: "https://riverbend.example.com/areas", quote: "Pine Flats" },
+    {
+      sourceId: "S1",
+      sourceUrl: "https://riverbend.example.com/",
+      quote: "Riverbend",
+    },
+    {
+      sourceId: "S2",
+      sourceUrl: "https://riverbend.example.com/areas",
+      quote: `Oak ${XSS}`,
+    },
+    {
+      sourceId: "S2",
+      sourceUrl: "https://riverbend.example.com/areas",
+      quote: "Pine Flats",
+    },
     { sourceId: "S3", sourceUrl: "javascript:alert(1)", quote: "Not a link" },
   ],
   retrieved: [
-    { sourceId: "S1", sourceUrl: "https://riverbend.example.com/", similarity: 0.4567 },
-    { sourceId: "S2", sourceUrl: "https://riverbend.example.com/areas", similarity: 0.3 },
+    {
+      sourceId: "S1",
+      sourceUrl: "https://riverbend.example.com/",
+      similarity: 0.4567,
+    },
+    {
+      sourceId: "S2",
+      sourceUrl: "https://riverbend.example.com/areas",
+      similarity: 0.3,
+    },
   ],
 };
-const insufficient = (reason: Exclude<AskRelayResult["reason"], null>): AskRelayResult => ({
+const insufficient = (
+  reason: Exclude<AskRelayResult["reason"], null>,
+): AskRelayResult => ({
   question: summary.question,
   status: "insufficient_evidence",
   reason,
@@ -82,7 +104,8 @@ test("Ask pages allow exactly their inline stylesheet and contain no scripts or 
 });
 
 test("Every dynamic value is escaped", () => {
-  const escaped = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;";
+  const escaped =
+    "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;";
   for (const html of allPages().slice(2)) assert.ok(html.includes(escaped));
   const form = renderAskForm({ askId: `"><b>`, prospects });
   assert.ok(form.includes('value="&quot;&gt;&lt;b&gt;"'));
@@ -91,7 +114,10 @@ test("Every dynamic value is escaped", () => {
 
 test("A verified answer shows grouped sources with https links and their quotes", () => {
   const html = renderAskAnswer(summary, answered, next);
-  assert.match(html, /<details class="panel" open>\s*<summary>Latest answer<\/summary>/);
+  assert.match(
+    html,
+    /<details class="panel" open>\s*<summary>Latest answer<\/summary>/,
+  );
   assert.match(html, /Sources and verified quotes/);
   assert.ok(
     html.includes(
@@ -100,7 +126,10 @@ test("A verified answer shows grouped sources with https links and their quotes"
   );
   // S2 is listed once with both of its quotes.
   assert.equal(html.match(/\[S2\]<\/span> <a/g)?.length, 1);
-  assert.match(html, /<blockquote>Oak &lt;script&gt;[\s\S]*<blockquote>Pine Flats<\/blockquote>/);
+  assert.match(
+    html,
+    /<blockquote>Oak &lt;script&gt;[\s\S]*<blockquote>Pine Flats<\/blockquote>/,
+  );
   // A non-https stored URL is shown as text, never as a link.
   assert.ok(!html.includes('href="javascript:'));
   assert.ok(html.includes("javascript:alert(1)"));
@@ -132,10 +161,16 @@ test("Insufficient evidence is stated clearly, with no sources, for each reason"
 });
 
 test("A pending answer refreshes itself and announces progress", () => {
-  const html = renderAskPending(summary, "11111111-1111-4111-8111-111111111111");
+  const html = renderAskPending(
+    summary,
+    "11111111-1111-4111-8111-111111111111",
+  );
   assert.match(html, /<meta http-equiv="refresh" content="1">/);
   assert.match(html, /role="status" aria-live="polite"/);
-  assert.match(html, /href="\/answer\?id=11111111-1111-4111-8111-111111111111"/);
+  assert.match(
+    html,
+    /href="\/answer\?id=11111111-1111-4111-8111-111111111111"/,
+  );
   assert.doesNotMatch(html, /<form/);
 });
 
@@ -152,15 +187,24 @@ test("The form keeps the selection and question, labels its fields, and handles 
     selected: prospects[1]!.id,
     question: "\nStarts with a newline",
   });
-  assert.match(html, /<option value="00000000-0000-4000-a000-000000000002" selected>/);
+  assert.match(
+    html,
+    /<option value="00000000-0000-4000-a000-000000000002" selected>/,
+  );
   assert.doesNotMatch(html, /000000000001" selected/);
   assert.match(html, /<label for="field-prospect">[\s\S]*id="field-prospect"/);
   assert.match(html, /<label for="field-question">[\s\S]*id="field-question"/);
   assert.match(html, /maxlength="500" required/);
   // HTML parsing drops the first newline after <textarea>, keeping the value.
-  assert.match(html, /aria-describedby="question-hint">\n\nStarts with a newline<\/textarea>/);
+  assert.match(
+    html,
+    /aria-describedby="question-hint">\n\nStarts with a newline<\/textarea>/,
+  );
   assert.match(html, /name="confirm" value="ask-relay">Ask Relay<\/button>/);
-  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
+  assert.match(
+    html,
+    /<meta name="viewport" content="width=device-width, initial-scale=1">/,
+  );
 
   const empty = renderAskForm({ askId: "id", prospects: [] });
   assert.match(empty, /No prospect has embedded research yet/);

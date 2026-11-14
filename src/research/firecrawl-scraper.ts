@@ -6,16 +6,22 @@ import {
 
 export class FirecrawlScrapeError extends Error {
   constructor(
-    public readonly kind: "request_not_sent" | "provider_failed" | "provider_uncertain" | "response_invalid",
+    public readonly kind:
+      | "request_not_sent"
+      | "provider_failed"
+      | "provider_uncertain"
+      | "response_invalid",
     public readonly httpStatus?: number,
     public readonly providerRequestId?: string,
   ) {
-    super({
-      request_not_sent: "Research request was not sent.",
-      provider_failed: "Research scrape failed.",
-      provider_uncertain: "Research scrape outcome is uncertain.",
-      response_invalid: "Research scrape provenance or content is invalid.",
-    }[kind]);
+    super(
+      {
+        request_not_sent: "Research request was not sent.",
+        provider_failed: "Research scrape failed.",
+        provider_uncertain: "Research scrape outcome is uncertain.",
+        response_invalid: "Research scrape provenance or content is invalid.",
+      }[kind],
+    );
     this.name = "FirecrawlScrapeError";
   }
 }
@@ -23,7 +29,9 @@ export class FirecrawlScrapeError extends Error {
 type Transport = (
   url: string,
   init: RequestInit,
-) => Promise<Pick<Response, "ok" | "text"> & Partial<Pick<Response, "status" | "headers">>>;
+) => Promise<
+  Pick<Response, "ok" | "text"> & Partial<Pick<Response, "status" | "headers">>
+>;
 
 function providerId(headers: Headers | undefined): string | undefined {
   const value = headers?.get("x-request-id") ?? headers?.get("request-id");
@@ -37,29 +45,40 @@ export function createFirecrawlScraper(
   if (!key?.trim()) throw new Error("FIRECRAWL_API_KEY is required.");
   return async (rawUrl) => {
     let url: string;
-    try { url = safeResearchUrl(rawUrl); }
-    catch { throw new FirecrawlScrapeError("request_not_sent"); }
+    try {
+      url = safeResearchUrl(rawUrl);
+    } catch {
+      throw new FirecrawlScrapeError("request_not_sent");
+    }
     let response: Awaited<ReturnType<Transport>>;
-    try { response = await transport("https://api.firecrawl.dev/v2/scrape", {
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(45000),
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        url,
-        formats: ["markdown", "links"],
-        onlyMainContent: true,
-        blockAds: true,
-      }),
-    }); } catch { throw new FirecrawlScrapeError("provider_uncertain"); }
+    try {
+      response = await transport("https://api.firecrawl.dev/v2/scrape", {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(45000),
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url,
+          formats: ["markdown", "links"],
+          onlyMainContent: true,
+          blockAds: true,
+        }),
+      });
+    } catch {
+      throw new FirecrawlScrapeError("provider_uncertain");
+    }
     const id = providerId(response.headers);
-    if (!response.ok) throw new FirecrawlScrapeError("provider_failed", response.status, id);
+    if (!response.ok)
+      throw new FirecrawlScrapeError("provider_failed", response.status, id);
     let body: string;
-    try { body = await response.text(); }
-    catch { throw new FirecrawlScrapeError("provider_uncertain", response.status, id); }
+    try {
+      body = await response.text();
+    } catch {
+      throw new FirecrawlScrapeError("provider_uncertain", response.status, id);
+    }
     if (Buffer.byteLength(body) > 250000)
       throw new FirecrawlScrapeError("response_invalid", response.status, id);
     let payload: {
@@ -70,8 +89,11 @@ export function createFirecrawlScraper(
         metadata?: { sourceURL?: unknown; statusCode?: unknown; url?: unknown };
       };
     };
-    try { payload = JSON.parse(body); }
-    catch { throw new FirecrawlScrapeError("response_invalid", response.status, id); }
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new FirecrawlScrapeError("response_invalid", response.status, id);
+    }
     const data = payload.data;
     const sourceUrl =
       typeof data?.metadata?.sourceURL === "string"

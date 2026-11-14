@@ -4,6 +4,12 @@
 // start, end). The same Markdown always yields the same chunks, so stored
 // chunks can be compared with a fresh chunking to detect conflicts.
 
+// Find paragraphs. Lines separated by blank lines become individual blocks.
+// Recognize headings. Markdown headings can start new chunks, helping preserve sections.
+// Combine smaller blocks. Adjacent blocks are grouped while staying within the 1,200-character limit.
+// Split oversized blocks. The algorithm prefers line breaks, then sentence boundaries, then spaces, before using a hard cut.
+// Preserve original text. Every chunk is an exact slice of the original Markdown, with its start and end positions recorded.
+
 export const RESEARCH_CHUNK_MAX_CHARS = 1200;
 
 export type ResearchTextChunk = {
@@ -53,8 +59,7 @@ function splitOversized(markdown: string, block: Span, max: number): Span[] {
         .map((match) => match.index + match[0].length)
         .at(-1) ?? 0;
     const word = window.lastIndexOf(" ") + 1;
-    let cut =
-      [line, sentence, word].find((offset) => offset > minimum) ?? max;
+    let cut = [line, sentence, word].find((offset) => offset > minimum) ?? max;
 
     // Never split a surrogate pair.
     const last = markdown.charCodeAt(position + cut - 1);

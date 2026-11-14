@@ -1,5 +1,6 @@
 // OpenAI embeddings for research chunks and Ask Relay questions. The model
 // and dimension are fixed by migration 015; changing them needs a migration.
+
 export const RESEARCH_EMBEDDING_MODEL = "text-embedding-3-small";
 export const RESEARCH_EMBEDDING_DIMENSIONS = 1536;
 // Inputs per request. Callers batch larger sets.
@@ -63,7 +64,10 @@ export function createOpenAIEmbedder(
     if (!Array.isArray(data) || data.length !== texts.length)
       throw new Error("Embedding response does not match the request.");
     const embeddings: number[][] = new Array(texts.length);
-    for (const item of data as Array<{ index?: unknown; embedding?: unknown }>) {
+    for (const item of data as Array<{
+      index?: unknown;
+      embedding?: unknown;
+    }>) {
       const index = item?.index;
       if (
         typeof index !== "number" ||

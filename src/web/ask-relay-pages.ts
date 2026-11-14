@@ -90,7 +90,11 @@ export function sourceLink(url: string): string {
     : escapeHtml(url);
 }
 
-export function askForm(view: AskFormView, heading: string, inDetails = false): string {
+export function askForm(
+  view: AskFormView,
+  heading: string,
+  inDetails = false,
+): string {
   if (!view.prospects.length)
     return `<div class="notice warning" role="status">
 <p><strong>No prospect has embedded research yet.</strong></p>
@@ -106,9 +110,12 @@ export function askForm(view: AskFormView, heading: string, inDetails = false): 
     view.error === undefined
       ? ""
       : `<div class="notice error" role="alert"><p>${escapeHtml(view.error)}</p></div>`;
-  const prospectField = view.fixedProspect && view.selected && view.prospects.some((prospect) => prospect.id === view.selected)
-    ? `<input type="hidden" name="${ASK_PROSPECT_FIELD}" value="${escapeHtml(view.selected)}">`
-    : `<div class="field"><label for="field-prospect">Prospect</label>
+  const prospectField =
+    view.fixedProspect &&
+    view.selected &&
+    view.prospects.some((prospect) => prospect.id === view.selected)
+      ? `<input type="hidden" name="${ASK_PROSPECT_FIELD}" value="${escapeHtml(view.selected)}">`
+      : `<div class="field"><label for="field-prospect">Prospect</label>
 <select id="field-prospect" name="${ASK_PROSPECT_FIELD}" required>
 ${options}
 </select></div>`;
@@ -220,7 +227,10 @@ ${askForm(next, "Ask another question")}`,
   );
 }
 
-export function renderAskAnswerInline(summary: AskSummary, result: AskRelayResult): string {
+export function renderAskAnswerInline(
+  summary: AskSummary,
+  result: AskRelayResult,
+): string {
   const outcome =
     result.status === "answered"
       ? `<details class="panel" open>
@@ -242,7 +252,10 @@ ${retrievedPanel(result)}`;
 }
 
 // Fixed text only: never provider or database error details.
-export function renderAskFailed(summary: AskSummary, next: AskFormView): string {
+export function renderAskFailed(
+  summary: AskSummary,
+  next: AskFormView,
+): string {
   return page(
     "No answer",
     `<h1>Ask Relay</h1>

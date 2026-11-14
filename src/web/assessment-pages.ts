@@ -39,15 +39,19 @@ type StatusView = { label: string; tone: "ok" | "warning" | "error" | "plain" };
 function statusView(history: AssessmentHistory): StatusView {
   const latest = history.records[0];
   if (!latest) return { label: "Not generated", tone: "plain" };
-  if (latest.status === "generating") return { label: "Generating", tone: "warning" };
-  if (latest.status === "needs_review") return { label: "Needs review", tone: "error" };
+  if (latest.status === "generating")
+    return { label: "Generating", tone: "warning" };
+  if (latest.status === "needs_review")
+    return { label: "Needs review", tone: "error" };
   if (latest.status === "failed") return { label: "Failed", tone: "error" };
   return latest.outdated
     ? { label: "Outdated", tone: "warning" }
     : { label: "Current", tone: "ok" };
 }
 
-export function assessmentGenerating(history: AssessmentHistory | null): boolean {
+export function assessmentGenerating(
+  history: AssessmentHistory | null,
+): boolean {
   return history?.records[0]?.status === "generating";
 }
 
@@ -65,7 +69,9 @@ function citations(items: readonly VerifiedCitation[]): string {
 }
 
 function bullets(items: readonly string[]): string {
-  return items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
+  return items.length
+    ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : "";
 }
 
 // Stored results are written only by the server, but a malformed row is
@@ -96,7 +102,8 @@ function hypothesisBlock(item: Hypothesis): string {
 // its place, labelled as a fallback. It is one of the stored, already verified opportunities, so
 // nothing is added or rewritten, and nothing is saved.
 function primaryHypothesisSection(result: AssessmentResult): string {
-  if (result.primaryOpportunityHypothesis) return hypothesisBlock(result.primaryOpportunityHypothesis);
+  if (result.primaryOpportunityHypothesis)
+    return hypothesisBlock(result.primaryOpportunityHypothesis);
   const fallback = result.topOpportunities[0];
   if (fallback)
     return `<p class="hint"><span class="tag">Fallback</span> The drafted primary hypothesis did not rest on an observation or signal Relay accepted, so it was not used. This is the first accepted opportunity (<strong>${escapeHtml(fallback.title)}</strong>), also listed below.</p>${hypothesisBlock(fallback)}`;
@@ -157,9 +164,9 @@ ${
 }
 <h3>Evidence by category</h3>
 ${result.categories
-    .map(
-      (category) =>
-        `<details class="category"><summary>${escapeHtml(category.label)}</summary>
+  .map(
+    (category) =>
+      `<details class="category"><summary>${escapeHtml(category.label)}</summary>
 <h4>Verified observations</h4>
 ${
   category.observations.length
@@ -178,13 +185,14 @@ ${bullets(category.hypotheses) || '<p class="hint">No grounded opportunity hypot
 <h4>Discovery questions</h4>
 ${bullets(category.discoveryQuestions) || '<p class="hint">No category-specific discovery question recorded.</p>'}
 </details>`,
-    )
-    .join("\n")}
+  )
+  .join("\n")}
 ${result.sources.some((item) => item.flagged) ? '<p class="hint">A source excerpt contained instruction-like text. It was treated as evidence only; it was never followed or accepted as a quote.</p>' : ""}
 ${result.withheld ? `<p class="hint">${result.withheld} model output${result.withheld === 1 ? " was" : "s were"} withheld because the quote did not support the claim, the text was not allowed, or it did not meet the evidence standards.</p>` : ""}`;
 }
 
-const UNDISPLAYABLE = '<p class="hint">The stored assessment could not be displayed.</p>';
+const UNDISPLAYABLE =
+  '<p class="hint">The stored assessment could not be displayed.</p>';
 
 // A stored row of an unexpected inner shape must not take the whole page down.
 function safeRender(result: AssessmentResult): string {
@@ -229,14 +237,20 @@ function historyList(records: readonly AssessmentRecord[]): string {
     .map(
       (record) =>
         `<li>${escapeHtml(date(record.createdAt))} · ${escapeHtml(
-          record.status === "completed" && record.outdated ? "completed (outdated)" : record.status.replace("_", " "),
+          record.status === "completed" && record.outdated
+            ? "completed (outdated)"
+            : record.status.replace("_", " "),
         )}</li>`,
     )
     .join("")}</ul></details>`;
 }
 
 export function renderAssessmentSection(
-  prospect: { id: string; embeddedChunks: number; websiteIndexStatus?: string | null },
+  prospect: {
+    id: string;
+    embeddedChunks: number;
+    websiteIndexStatus?: string | null;
+  },
   history: AssessmentHistory | null,
 ): string {
   const indexed =
@@ -250,7 +264,8 @@ export function renderAssessmentSection(
     ? '<div class="notice warning" role="status"><p>The research, the fit rubric, or the assessment pipeline has changed since this assessment was generated. It is kept as history; generate a new one to analyze the current basis.</p></div>'
     : "";
   const held =
-    view.records[0]?.status === "needs_review" || view.records[0]?.status === "failed"
+    view.records[0]?.status === "needs_review" ||
+    view.records[0]?.status === "failed"
       ? `<div class="notice error" role="status"><p>${
           view.records[0].status === "failed"
             ? "The last assessment response was unusable, so nothing was saved from it."

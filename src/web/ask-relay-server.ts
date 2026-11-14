@@ -66,7 +66,10 @@ type AskRun = { summary: AskSummary } & (
   | { state: "failed" }
 );
 export type InlineAskResult = { content: string; refresh: boolean };
-export type AskRelayHandler = ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & {
+export type AskRelayHandler = ((
+  req: IncomingMessage,
+  res: ServerResponse,
+) => Promise<void>) & {
   inlineAnswer: (prospectId: string, askId: string) => InlineAskResult | null;
 };
 type Route = {
@@ -500,9 +503,10 @@ export function createAskRelayHandler(
       if (run.state === "running")
         return { content: renderAskPendingInline(run.summary), refresh: true };
       return {
-        content: run.state === "done"
-          ? renderAskAnswerInline(run.summary, run.result)
-          : renderAskFailedInline(run.summary),
+        content:
+          run.state === "done"
+            ? renderAskAnswerInline(run.summary, run.result)
+            : renderAskFailedInline(run.summary),
         refresh: false,
       };
     },
@@ -512,7 +516,14 @@ export function createAskRelayHandler(
 function createAskRelayServer(dependencies: AskServerDependencies): Server {
   const server = createServer((req, res) => {
     handle(req, res).catch((error: unknown) => {
-      try { dependencies.log?.({ event: "request_failed", error: errorKind(error) }); } catch { /* logging is best effort */ }
+      try {
+        dependencies.log?.({
+          event: "request_failed",
+          error: errorKind(error),
+        });
+      } catch {
+        /* logging is best effort */
+      }
       if (res.headersSent || res.destroyed) {
         res.destroy();
         return;

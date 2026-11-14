@@ -58,15 +58,16 @@ async function main(): Promise<void> {
     server = await startAskRelayServer({
       port,
       listProspects: () => listIndexedProspects(pool),
-      ask: (input) => askRelay(input, {
-        database: pool,
-        embed,
-        answer,
-        onCitationFailure: citationDiagnosticLogger(
-          process.env.RELAY_ASK_CITATION_DIAGNOSTICS === "true",
-          log,
-        ),
-      }),
+      ask: (input) =>
+        askRelay(input, {
+          database: pool,
+          embed,
+          answer,
+          onCitationFailure: citationDiagnosticLogger(
+            process.env.RELAY_ASK_CITATION_DIAGNOSTICS === "true",
+            log,
+          ),
+        }),
       log,
     });
   } catch (error) {

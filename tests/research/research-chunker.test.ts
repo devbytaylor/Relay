@@ -54,7 +54,9 @@ test("Image-only blocks and thematic breaks never form chunks", () => {
 });
 
 test("Paragraphs are packed up to the size limit", () => {
-  const paragraph = "Fictional sentence about seasonal maintenance plans. ".repeat(4).trim();
+  const paragraph = "Fictional sentence about seasonal maintenance plans. "
+    .repeat(4)
+    .trim();
   const markdown = Array.from({ length: 12 }, () => paragraph).join("\n\n");
   const chunks = chunkResearchMarkdown(markdown);
   assert.ok(chunks.length > 1);
@@ -63,10 +65,7 @@ test("Paragraphs are packed up to the size limit", () => {
     assert.equal(chunk.content, markdown.slice(chunk.start, chunk.end));
   }
   // Every paragraph lands in exactly one chunk, in order.
-  assert.equal(
-    chunks.map((chunk) => chunk.content).join("\n\n"),
-    markdown,
-  );
+  assert.equal(chunks.map((chunk) => chunk.content).join("\n\n"), markdown);
 });
 
 test("An oversized block is split into ordered slices that keep every word", () => {

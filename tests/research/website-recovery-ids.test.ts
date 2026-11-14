@@ -10,7 +10,8 @@ test("recovery identity validation accepts real-format UUIDs and rejects malform
     "0810ab39-d8e0-484b-9d12-3fa2048ecc9e",
     "00000000-0000-4000-a000-000000000001",
     "AAFB94CA-80BC-4E5F-9932-EEB8E61188F0",
-  ]) assert.equal(isUuid(id), true, id);
+  ])
+    assert.equal(isUuid(id), true, id);
 
   for (const value of [
     "aafb94ca-80bc-4e5f-e61188f0abcd",
@@ -25,5 +26,6 @@ test("recovery identity validation accepts real-format UUIDs and rejects malform
     undefined,
     null,
     42,
-  ]) assert.equal(isUuid(value), false, String(value));
+  ])
+    assert.equal(isUuid(value), false, String(value));
 });

@@ -100,21 +100,24 @@ export const ASSESSMENT_CATEGORIES: readonly {
     label: "Phone intake and contact availability",
     query:
       "Phone number to call the business, office hours, who answers calls, and ways to reach the company",
-    keywords: 'call or phone or telephone or "office hours" or "business hours"',
+    keywords:
+      'call or phone or telephone or "office hours" or "business hours"',
   },
   {
     id: "website_forms",
     label: "Website forms and service requests",
     query:
       "Contact form or request form on the website to ask for service, a quote, or an estimate",
-    keywords: 'form or quote or estimate or "request service" or "service request"',
+    keywords:
+      'form or quote or estimate or "request service" or "service request"',
   },
   {
     id: "online_booking",
     label: "Online scheduling and booking",
     query:
       "Book or schedule an appointment online, an online booking calendar, or scheduling a visit",
-    keywords: '"book online" or "online booking" or "schedule online" or "schedule an appointment" or booking',
+    keywords:
+      '"book online" or "online booking" or "schedule online" or "schedule an appointment" or booking',
   },
   {
     id: "after_hours",
@@ -163,7 +166,11 @@ const evidenceKey = (content: string) =>
 // are hard limits. via records which searches found each chunk for the categories
 // that picked it.
 export function mergeAssessmentEvidence<T extends EvidenceCandidate>(
-  perCategory: readonly { vector: readonly T[]; keyword: readonly T[]; keywordSlots?: number }[],
+  perCategory: readonly {
+    vector: readonly T[];
+    keyword: readonly T[];
+    keywordSlots?: number;
+  }[],
   limits: AssessmentRetrievalLimits = ASSESSMENT_RETRIEVAL_LIMITS,
 ): { candidate: T; via: EvidenceVia }[] {
   const chosen: T[] = [];
@@ -190,10 +197,18 @@ export function mergeAssessmentEvidence<T extends EvidenceCandidate>(
       // Redundant: the same text, text inside an earlier choice, or a near-copy that only adds a
       // little to one. A larger chunk that merely contains a short earlier one (a page title, say)
       // carries new information and is kept.
-      if (!key || keys.some((prior) => prior.includes(key) || (key.includes(prior) && prior.length >= key.length * 0.8)))
+      if (
+        !key ||
+        keys.some(
+          (prior) =>
+            prior.includes(key) ||
+            (key.includes(prior) && prior.length >= key.length * 0.8),
+        )
+      )
         return false;
       const size = Buffer.byteLength(item.content);
-      if (chosen.length >= limits.maxChunks || bytes + size > limits.maxBytes) return false;
+      if (chosen.length >= limits.maxChunks || bytes + size > limits.maxBytes)
+        return false;
       chosen.push(item);
       keys.push(key);
       ids.add(item.id);
@@ -208,29 +223,48 @@ export function mergeAssessmentEvidence<T extends EvidenceCandidate>(
     return true;
   };
 
-  for (let progress = true; progress; ) {
+  for (let progress = true; progress;) {
     progress = false;
     for (const [index, entry] of perCategory.entries()) {
       const state = states[index]!;
       if (state.picked >= limits.perCategory) continue;
       const slots = entry.keywordSlots ?? limits.keywordPerCategory;
       let took = false;
-      while (!took && state.keywordTaken < slots && state.keywordIndex < entry.keyword.length) {
+      while (
+        !took &&
+        state.keywordTaken < slots &&
+        state.keywordIndex < entry.keyword.length
+      ) {
         const item = entry.keyword[state.keywordIndex++]!;
-        if ((state.perPage.get(item.sourceUrl) ?? 0) >= limits.maxKeywordPerPage) continue;
+        if (
+          (state.perPage.get(item.sourceUrl) ?? 0) >= limits.maxKeywordPerPage
+        )
+          continue;
         if (take(item, state)) {
           took = true;
           state.keywordTaken++;
-          state.perPage.set(item.sourceUrl, (state.perPage.get(item.sourceUrl) ?? 0) + 1);
+          state.perPage.set(
+            item.sourceUrl,
+            (state.perPage.get(item.sourceUrl) ?? 0) + 1,
+          );
         }
       }
-      while (!took && state.vectorIndex < entry.vector.length) took = take(entry.vector[state.vectorIndex++]!, state);
+      while (!took && state.vectorIndex < entry.vector.length)
+        took = take(entry.vector[state.vectorIndex++]!, state);
       if (took) progress = true;
     }
   }
   return chosen.map((candidate) => {
     const flags = route.get(candidate.id)!;
-    return { candidate, via: flags.vector && flags.keyword ? "both" : flags.keyword ? "keyword" : "vector" };
+    return {
+      candidate,
+      via:
+        flags.vector && flags.keyword
+          ? "both"
+          : flags.keyword
+            ? "keyword"
+            : "vector",
+    };
   });
 }
 
@@ -238,7 +272,10 @@ export function mergeAssessmentEvidence<T extends EvidenceCandidate>(
 // repeat of an earlier one, in the order the search ranked them. A call to action or widget repeated
 // on every page would otherwise fill the candidate window with one passage, so the distinct passages
 // ranked just below it never reach the merge. The first occurrence keeps its page and chunk identity.
-export function distinctCandidates<T extends EvidenceCandidate>(rows: readonly T[], limit: number): T[] {
+export function distinctCandidates<T extends EvidenceCandidate>(
+  rows: readonly T[],
+  limit: number,
+): T[] {
   const seen = new Set<string>();
   const kept: T[] = [];
   if (limit <= 0) return kept;
@@ -325,14 +362,22 @@ export type AssessmentResult = {
   topOpportunities: (Hypothesis & { title: string })[];
   // flagged: the excerpt contained instruction-like text, treated as evidence only.
   // via: whether vector search, keyword search, or both found the excerpt.
-  sources: { sourceId: string; sourceUrl: string; flagged: boolean; via: EvidenceVia }[];
+  sources: {
+    sourceId: string;
+    sourceUrl: string;
+    flagged: boolean;
+    via: EvidenceVia;
+  }[];
   withheld: number;
   // Operator diagnostics, never rendered in the assessment page: one entry per withheld item, so
   // withheld === diagnostics.withheld.length. Absent from assessments saved before the ledger existed.
   diagnostics?: { withheld: WithheldEntry[] };
 };
 
-export type RetrievedSource = AnswerSource & { chunkId: string; via: EvidenceVia };
+export type RetrievedSource = AnswerSource & {
+  chunkId: string;
+  via: EvidenceVia;
+};
 
 type Cite = { source: string; quote: string };
 // A hypothesis is two ids. The server composes the sentence, so the model supplies
@@ -348,7 +393,10 @@ type Draft = {
   }[];
   primary: DraftHypothesis & { category: AssessmentCategoryId };
   primaryQuestion: string;
-  fit: { signals: { signal: FitSignalId; citations: Cite[] }[]; unknowns: UnknownId[] };
+  fit: {
+    signals: { signal: FitSignalId; citations: Cite[] }[];
+    unknowns: UnknownId[];
+  };
   top: (DraftHypothesis & { category: AssessmentCategoryId })[];
 };
 
@@ -358,12 +406,20 @@ const reject = (): never => {
   );
 };
 const TEXT_LIMIT = 1500;
-const line = (value: unknown): string => (text(value, TEXT_LIMIT) ? value : reject());
-const list = <T>(value: unknown, max: number, item: (entry: unknown) => T): T[] =>
+const line = (value: unknown): string =>
+  text(value, TEXT_LIMIT) ? value : reject();
+const list = <T>(
+  value: unknown,
+  max: number,
+  item: (entry: unknown) => T,
+): T[] =>
   Array.isArray(value) && value.length <= max ? value.map(item) : reject();
 const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T =>
   allowed.includes(value as T) ? (value as T) : reject();
-const EVIDENCE_REFS: readonly string[] = [...OBSERVATION_TYPE_IDS, ...FIT_SIGNAL_IDS];
+const EVIDENCE_REFS: readonly string[] = [
+  ...OBSERVATION_TYPE_IDS,
+  ...FIT_SIGNAL_IDS,
+];
 
 export function parseAssessmentDraft(
   raw: unknown,
@@ -388,7 +444,10 @@ export function parseAssessmentDraft(
   const strings = (entry: unknown, max: number) => list(entry, max, line);
   const hypothesis = (entry: unknown): DraftHypothesis =>
     exact(entry, ["observed", "unknown"])
-      ? { observed: oneOf(entry.observed, EVIDENCE_REFS), unknown: oneOf(entry.unknown, UNKNOWN_IDS) }
+      ? {
+          observed: oneOf(entry.observed, EVIDENCE_REFS),
+          unknown: oneOf(entry.unknown, UNKNOWN_IDS),
+        }
       : reject();
 
   if (
@@ -402,29 +461,32 @@ export function parseAssessmentDraft(
   )
     return reject();
 
-  const categories = list(value.categories, ASSESSMENT_CATEGORY_IDS.length, (entry) =>
-    exact(entry, [
-      "category",
-      "observations",
-      "unknowns",
-      "hypotheses",
-      "discovery_questions",
-    ])
-      ? {
-          category: oneOf(entry.category, ASSESSMENT_CATEGORY_IDS),
-          observations: list(entry.observations, 8, (observation) =>
-            exact(observation, ["type", "citations"])
-              ? {
-                  type: oneOf(observation.type, OBSERVATION_TYPE_IDS),
-                  citations: cites(observation.citations),
-                }
-              : reject(),
-          ),
-          unknowns: unknowns(entry.unknowns, 6),
-          hypotheses: list(entry.hypotheses, 4, hypothesis),
-          discoveryQuestions: strings(entry.discovery_questions, 4),
-        }
-      : reject(),
+  const categories = list(
+    value.categories,
+    ASSESSMENT_CATEGORY_IDS.length,
+    (entry) =>
+      exact(entry, [
+        "category",
+        "observations",
+        "unknowns",
+        "hypotheses",
+        "discovery_questions",
+      ])
+        ? {
+            category: oneOf(entry.category, ASSESSMENT_CATEGORY_IDS),
+            observations: list(entry.observations, 8, (observation) =>
+              exact(observation, ["type", "citations"])
+                ? {
+                    type: oneOf(observation.type, OBSERVATION_TYPE_IDS),
+                    citations: cites(observation.citations),
+                  }
+                : reject(),
+            ),
+            unknowns: unknowns(entry.unknowns, 6),
+            hypotheses: list(entry.hypotheses, 4, hypothesis),
+            discoveryQuestions: strings(entry.discovery_questions, 4),
+          }
+        : reject(),
   );
   if (
     new Set(categories.map((entry) => entry.category)).size !==
@@ -441,7 +503,10 @@ export function parseAssessmentDraft(
     return reject();
   return {
     categories,
-    primary: { category: oneOf(primary.category, ASSESSMENT_CATEGORY_IDS), ...hypothesis({ observed: primary.observed, unknown: primary.unknown }) },
+    primary: {
+      category: oneOf(primary.category, ASSESSMENT_CATEGORY_IDS),
+      ...hypothesis({ observed: primary.observed, unknown: primary.unknown }),
+    },
     primaryQuestion: line(value.primary_discovery_question),
     fit: {
       signals: list(fit.signals, 12, (entry) =>
@@ -456,7 +521,10 @@ export function parseAssessmentDraft(
     },
     top: list(value.top_opportunities, 3, (entry) =>
       exact(entry, ["category", "observed", "unknown"])
-        ? { category: oneOf(entry.category, ASSESSMENT_CATEGORY_IDS), ...hypothesis({ observed: entry.observed, unknown: entry.unknown }) }
+        ? {
+            category: oneOf(entry.category, ASSESSMENT_CATEGORY_IDS),
+            ...hypothesis({ observed: entry.observed, unknown: entry.unknown }),
+          }
         : reject(),
     ),
   };
@@ -477,18 +545,25 @@ export function buildAssessmentResult(
 ): { result: AssessmentResult; withheld: number } {
   // Every withheld item gets exactly one ledger entry, and `withheld` is the ledger's size.
   const ledger: WithheldEntry[] = [];
-  const withhold = (input: WithheldInput) => void ledger.push(withheldEntry(input));
+  const withhold = (input: WithheldInput) =>
+    void ledger.push(withheldEntry(input));
   // Evidence the model reported and the server withheld, so a hypothesis resting on it can say so.
   const rejectedClaims = new Set<string>();
   const unconfirmed: Unconfirmed[] = [];
   // A quote is verbatim in the stored source, or in the source with verified telephone links
   // read as their labels ("Call 555-0100" for "Call [555-0100](tel:+15550100)"). The quote is
   // checked as written and never rewritten.
-  const withTelLabels = retrieved.map((item) => ({ ...item, text: resolveTelLinks(item.text) }));
+  const withTelLabels = retrieved.map((item) => ({
+    ...item,
+    text: resolveTelLinks(item.text),
+  }));
   const verified = (cites: Cite[]) =>
     cites.every((cite) =>
       [retrieved, withTelLabels].some((pool) =>
-        citationsVerified({ status: "answered", answer: "-", citations: [cite] }, pool),
+        citationsVerified(
+          { status: "answered", answer: "-", citations: [cite] },
+          pool,
+        ),
       ),
     );
   const resolve = (cites: Cite[]): VerifiedCitation[] =>
@@ -503,7 +578,9 @@ export function buildAssessmentResult(
     });
   // Real quotes only (verbatim in the stored source), and never text that tries to
   // steer the assessment. Normalization happens later, only to interpret the quote.
-  const citationProblem = (cites: Cite[]): "no_citations" | "instruction_like_quote" | "quote_not_verbatim" | null =>
+  const citationProblem = (
+    cites: Cite[],
+  ): "no_citations" | "instruction_like_quote" | "quote_not_verbatim" | null =>
     cites.length === 0
       ? "no_citations"
       : cites.some((cite) => isInstructionLike(cite.quote))
@@ -513,20 +590,39 @@ export function buildAssessmentResult(
           : "quote_not_verbatim";
   const sourcesOf = (cites: Cite[]) => [
     ...new Map(
-      cites.map((cite) => [cite.source, { sourceId: cite.source, chunkId: retrieved.find((item) => item.id === cite.source)!.chunkId }]),
+      cites.map((cite) => [
+        cite.source,
+        {
+          sourceId: cite.source,
+          chunkId: retrieved.find((item) => item.id === cite.source)!.chunkId,
+        },
+      ]),
     ).values(),
   ];
-  const quotesOf = (cites: Cite[]) => cites.map((cite) => cite.quote).join(" | ");
+  const quotesOf = (cites: Cite[]) =>
+    cites.map((cite) => cite.quote).join(" | ");
   // The stored text around each quote. Hedges and interface labels are read from here, so a
   // shortened or re-cased quote cannot hide them. A quote that cannot be located is never supported.
-  const sourceText = (id: string) => retrieved.find((item) => item.id === id)!.text;
-  const contextsFor = (cites: Cite[]) => cites.map((cite) => enclosingText(sourceText(cite.source), cite.quote));
-  const unconfirm = (scope: Unconfirmed["scope"], id: string, label: string, cites: Cite[]) => {
+  const sourceText = (id: string) =>
+    retrieved.find((item) => item.id === id)!.text;
+  const contextsFor = (cites: Cite[]) =>
+    cites.map((cite) => enclosingText(sourceText(cite.source), cite.quote));
+  const unconfirm = (
+    scope: Unconfirmed["scope"],
+    id: string,
+    label: string,
+    cites: Cite[],
+  ) => {
     const citations = resolve(cites);
     const repeated = unconfirmed.some(
-      (item) => item.scope === scope && item.id === id && item.citations.map((c) => c.quote).join("\u0000") === citations.map((c) => c.quote).join("\u0000"),
+      (item) =>
+        item.scope === scope &&
+        item.id === id &&
+        item.citations.map((c) => c.quote).join("\u0000") ===
+          citations.map((c) => c.quote).join("\u0000"),
     );
-    if (!repeated && unconfirmed.length < MAX_UNCONFIRMED) unconfirmed.push({ scope, id, label, citations });
+    if (!repeated && unconfirmed.length < MAX_UNCONFIRMED)
+      unconfirmed.push({ scope, id, label, citations });
   };
   const QUESTION_REASONS = {
     length: "question_length",
@@ -545,31 +641,51 @@ export function buildAssessmentResult(
   const meetsQuestionStandard = (
     value: string,
     scope: "primary" | "category",
-    at: { field: WithheldField; category?: AssessmentCategoryId; index: number },
+    at: {
+      field: WithheldField;
+      category?: AssessmentCategoryId;
+      index: number;
+    },
   ): boolean => {
-    const problem = discoveryQuestionProblem(value, scope) as keyof typeof QUESTION_REASONS | null;
+    const problem = discoveryQuestionProblem(value, scope) as
+      keyof typeof QUESTION_REASONS | null;
     const suspicious = suspiciousTextReason(value);
     if (problem === null && suspicious === null) return true;
     // Hostile text (instruction-like, links, markup) is named as such first, so none of it is recorded.
-    const hostile = suspicious === "instruction_like" || suspicious === "markup_or_link";
+    const hostile =
+      suspicious === "instruction_like" || suspicious === "markup_or_link";
     withhold({
       ...at,
-      reason: hostile ? SUSPICIOUS_REASONS[suspicious] : problem !== null ? QUESTION_REASONS[problem] : SUSPICIOUS_REASONS[suspicious!],
+      reason: hostile
+        ? SUSPICIOUS_REASONS[suspicious]
+        : problem !== null
+          ? QUESTION_REASONS[problem]
+          : SUSPICIOUS_REASONS[suspicious!],
     });
     return false;
   };
   // The observation types the server accepted. A question naming a website feature (a form, online
   // booking, a portal, online payment) is asked only when one of them shows that feature.
   const acceptedTypes = (): ReadonlySet<string> =>
-    new Set([...observationsByCategory.values()].flatMap((items) => items.map((item) => item.type)));
+    new Set(
+      [...observationsByCategory.values()].flatMap((items) =>
+        items.map((item) => item.type),
+      ),
+    );
   const unknownsOf = (ids: readonly UnknownId[]): Unknown[] =>
     [...new Set(ids)].map((id) => ({ id, text: unknownText(id) }));
 
   // 1. Observations: typed, supported by the quote, one per type per category.
-  const observationsByCategory = new Map<AssessmentCategoryId, AssessmentResult["categories"][number]["observations"]>();
+  const observationsByCategory = new Map<
+    AssessmentCategoryId,
+    AssessmentResult["categories"][number]["observations"]
+  >();
   for (const definition of ASSESSMENT_CATEGORIES) {
-    const entry = draft.categories.find((item) => item.category === definition.id)!;
-    const observations: AssessmentResult["categories"][number]["observations"] = [];
+    const entry = draft.categories.find(
+      (item) => item.category === definition.id,
+    )!;
+    const observations: AssessmentResult["categories"][number]["observations"] =
+      [];
     for (const [position, item] of entry.observations.entries()) {
       const type = observationType(item.type)!;
       const quotes = item.citations.map((cite) => cite.quote);
@@ -598,14 +714,21 @@ export function buildAssessmentResult(
         type.id === "phone_number_listed" &&
         item.citations.some((cite) => {
           const number = findPhoneNumber(cite.quote);
-          return number !== null && phoneNumberContradicted(sourceText(cite.source), number);
+          return (
+            number !== null &&
+            phoneNumberContradicted(sourceText(cite.source), number)
+          );
         })
       ) {
         withhold({ ...at, reason: "phone_number_contradicted" });
         rejectedClaims.add(type.id);
         continue;
       }
-      const support = observationSupport(type, quotes, contextsFor(item.citations));
+      const support = observationSupport(
+        type,
+        quotes,
+        contextsFor(item.citations),
+      );
       if (support === "ambiguous") {
         unconfirm("observation", type.id, type.label, item.citations);
         continue;
@@ -637,7 +760,9 @@ export function buildAssessmentResult(
   for (const [position, item] of draft.fit.signals.entries()) {
     const quotes = item.citations.map((cite) => normalizedQuote(cite.quote));
     const shared = quotes.some((quote) =>
-      claimed.some((prior) => prior.signal !== item.signal && overlaps(quote, prior.quote)),
+      claimed.some(
+        (prior) => prior.signal !== item.signal && overlaps(quote, prior.quote),
+      ),
     );
     const problem = citationProblem(item.citations);
     const at = {
@@ -652,9 +777,18 @@ export function buildAssessmentResult(
       rejectedClaims.add(item.signal);
       continue;
     }
-    const support = signalSupport(item.signal, item.citations.map((cite) => cite.quote), contextsFor(item.citations));
+    const support = signalSupport(
+      item.signal,
+      item.citations.map((cite) => cite.quote),
+      contextsFor(item.citations),
+    );
     if (support === "ambiguous") {
-      unconfirm("signal", item.signal, signalLabel(item.signal), item.citations);
+      unconfirm(
+        "signal",
+        item.signal,
+        signalLabel(item.signal),
+        item.citations,
+      );
       continue;
     }
     if (support === "unsupported") {
@@ -676,16 +810,28 @@ export function buildAssessmentResult(
   // from the catalog. Evidence the server rejected (or only left Unconfirmed) cannot
   // support one, and an observation type from another category cannot either.
   const accepted = [...observationsByCategory.values()].flat();
-  const accept = (ref: string, category?: AssessmentCategoryId): VerifiedStatement | null => {
+  const accept = (
+    ref: string,
+    category?: AssessmentCategoryId,
+  ): VerifiedStatement | null => {
     const signal = signals.find((item) => item.id === ref);
     if (signal) return signal;
-    return accepted.find((item) => item.type === ref && (!category || observationType(ref)!.category === category)) ?? null;
+    return (
+      accepted.find(
+        (item) =>
+          item.type === ref &&
+          (!category || observationType(ref)!.category === category),
+      ) ?? null
+    );
   };
   const grounded = (
     item: DraftHypothesis,
     category: AssessmentCategoryId,
     scoped: boolean,
-    at: { field: "category_hypotheses" | "primary_hypothesis" | "top_opportunities"; index: number },
+    at: {
+      field: "category_hypotheses" | "primary_hypothesis" | "top_opportunities";
+      index: number;
+    },
   ): Hypothesis | null => {
     const observed = accept(item.observed, scoped ? category : undefined);
     if (!observed) {
@@ -704,7 +850,9 @@ export function buildAssessmentResult(
         claim: item.observed,
         unknown: item.unknown,
         evidenceStatus,
-        reason: elsewhere ? "hypothesis_evidence_wrong_category" : "hypothesis_evidence_not_accepted",
+        reason: elsewhere
+          ? "hypothesis_evidence_wrong_category"
+          : "hypothesis_evidence_not_accepted",
       });
       return null;
     }
@@ -712,18 +860,28 @@ export function buildAssessmentResult(
       // An observation type belongs to one category; a signal keeps the category the model declared.
       category: observationType(item.observed)?.category ?? category,
       statement: composeHypothesis(observed.statement, item.unknown),
-      observed: { ref: item.observed, statement: observed.statement, citations: observed.citations },
+      observed: {
+        ref: item.observed,
+        statement: observed.statement,
+        citations: observed.citations,
+      },
       unknown: { id: item.unknown, text: unknownText(item.unknown) },
     };
   };
 
   const types = acceptedTypes();
   const categories = ASSESSMENT_CATEGORIES.map((definition) => {
-    const entry = draft.categories.find((item) => item.category === definition.id)!;
+    const entry = draft.categories.find(
+      (item) => item.category === definition.id,
+    )!;
     const hypotheses: string[] = [];
     for (const [position, item] of entry.hypotheses.entries()) {
-      const kept = grounded(item, definition.id, true, { field: "category_hypotheses", index: position });
-      if (kept && !hypotheses.includes(kept.statement)) hypotheses.push(kept.statement);
+      const kept = grounded(item, definition.id, true, {
+        field: "category_hypotheses",
+        index: position,
+      });
+      if (kept && !hypotheses.includes(kept.statement))
+        hypotheses.push(kept.statement);
     }
     return {
       category: definition.id,
@@ -732,7 +890,11 @@ export function buildAssessmentResult(
       unknowns: unknownsOf(entry.unknowns),
       hypotheses,
       discoveryQuestions: entry.discoveryQuestions.filter((question, index) => {
-        const at = { field: "category_questions" as const, category: definition.id, index };
+        const at = {
+          field: "category_questions" as const,
+          category: definition.id,
+          index,
+        };
         if (!meetsQuestionStandard(question, "category", at)) return false;
         // Not asked: it presupposes a website feature the accepted evidence does not show.
         const feature = ungroundedQuestionFeature(question, types);
@@ -742,7 +904,10 @@ export function buildAssessmentResult(
       }),
     };
   });
-  const primary = grounded(draft.primary, draft.primary.category, false, { field: "primary_hypothesis", index: 0 });
+  const primary = grounded(draft.primary, draft.primary.category, false, {
+    field: "primary_hypothesis",
+    index: 0,
+  });
   // A primary question that presupposes an unverified website feature is replaced by a channel-neutral
   // one the server wrote, which names no channel. A question that failed the style standard stays null.
   let primaryQuestion: string | null = null;
@@ -751,12 +916,20 @@ export function buildAssessmentResult(
     const feature = ungroundedQuestionFeature(draft.primaryQuestion, types);
     if (feature === null) primaryQuestion = draft.primaryQuestion;
     else {
-      withhold({ ...primaryAt, reason: "question_unsupported_premise", feature, replacedByNeutral: true });
+      withhold({
+        ...primaryAt,
+        reason: "question_unsupported_premise",
+        feature,
+        replacedByNeutral: true,
+      });
       primaryQuestion = CHANNEL_NEUTRAL_PRIMARY_QUESTION;
     }
   }
   const topOpportunities = draft.top.flatMap((item, position) => {
-    const kept = grounded(item, item.category, false, { field: "top_opportunities", index: position });
+    const kept = grounded(item, item.category, false, {
+      field: "top_opportunities",
+      index: position,
+    });
     return kept ? [{ ...kept, title: unknownTopic(item.unknown) }] : [];
   });
 
@@ -764,8 +937,14 @@ export function buildAssessmentResult(
   // of the same passage cannot manufacture a second independent observation.
   const evidence: string[][] = [];
   for (const observation of accepted) {
-    const quotes = observation.citations.map((cite) => normalizedQuote(cite.quote));
-    if (!evidence.some((seen) => quotes.some((quote) => seen.some((prior) => overlaps(quote, prior)))))
+    const quotes = observation.citations.map((cite) =>
+      normalizedQuote(cite.quote),
+    );
+    if (
+      !evidence.some((seen) =>
+        quotes.some((quote) => seen.some((prior) => overlaps(quote, prior))),
+      )
+    )
       evidence.push(quotes);
   }
   const { grade, basis } = classifyFit({
@@ -842,27 +1021,46 @@ export async function retrieveAssessmentSources(
   deps: { database: Pool; embed: Embedder },
   limits: AssessmentRetrievalLimits = ASSESSMENT_RETRIEVAL_LIMITS,
 ): Promise<RetrievedSource[]> {
-  const embeddings = await deps.embed(ASSESSMENT_CATEGORIES.map((item) => item.query));
+  const embeddings = await deps.embed(
+    ASSESSMENT_CATEGORIES.map((item) => item.query),
+  );
   if (
     !Array.isArray(embeddings) ||
     embeddings.length !== ASSESSMENT_CATEGORIES.length ||
     !embeddings.every(isResearchEmbedding)
   )
     throw new Error("Embedding provider returned an invalid response.");
-  const perCategory: { vector: EvidenceCandidate[]; keyword: EvidenceCandidate[]; keywordSlots?: number }[] = [];
+  const perCategory: {
+    vector: EvidenceCandidate[];
+    keyword: EvidenceCandidate[];
+    keywordSlots?: number;
+  }[] = [];
   for (const [position, category] of ASSESSMENT_CATEGORIES.entries()) {
     const vector = distinctCandidates(
       await searchResearchChunks(
-        { prospectId, embedding: embeddings[position]!, limit: CANDIDATE_READ_LIMIT },
+        {
+          prospectId,
+          embedding: embeddings[position]!,
+          limit: CANDIDATE_READ_LIMIT,
+        },
         deps.database,
       ),
-      Math.min(CANDIDATE_READ_LIMIT, limits.perCategory * VECTOR_CANDIDATE_FACTOR),
+      Math.min(
+        CANDIDATE_READ_LIMIT,
+        limits.perCategory * VECTOR_CANDIDATE_FACTOR,
+      ),
     );
-    const slots = limits.keywordPerCategory ? (category.keywordSlots ?? limits.keywordPerCategory) : 0;
+    const slots = limits.keywordPerCategory
+      ? (category.keywordSlots ?? limits.keywordPerCategory)
+      : 0;
     const keyword = slots
       ? distinctCandidates(
           await searchResearchChunksByKeyword(
-            { prospectId, query: category.keywords, limit: CANDIDATE_READ_LIMIT },
+            {
+              prospectId,
+              query: category.keywords,
+              limit: CANDIDATE_READ_LIMIT,
+            },
             deps.database,
           ),
           Math.min(CANDIDATE_READ_LIMIT, slots * KEYWORD_CANDIDATES_PER_SLOT),
@@ -870,13 +1068,15 @@ export async function retrieveAssessmentSources(
       : [];
     perCategory.push({ vector, keyword, keywordSlots: slots });
   }
-  return mergeAssessmentEvidence(perCategory, limits).map(({ candidate, via }, position) => ({
-    id: `S${position + 1}`,
-    chunkId: candidate.id,
-    sourceUrl: candidate.sourceUrl,
-    text: candidate.content,
-    via,
-  }));
+  return mergeAssessmentEvidence(perCategory, limits).map(
+    ({ candidate, via }, position) => ({
+      id: `S${position + 1}`,
+      chunkId: candidate.id,
+      sourceUrl: candidate.sourceUrl,
+      text: candidate.content,
+      via,
+    }),
+  );
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -928,14 +1128,22 @@ export async function generateLeadIntakeAssessment(
     if (!sources.length)
       throw new AssessmentOutputError("No research could be retrieved.");
     built = buildAssessmentResult(
-      parseAssessmentDraft(raw, sources.map((item) => item.id)),
+      parseAssessmentDraft(
+        raw,
+        sources.map((item) => item.id),
+      ),
       sources,
     );
     assertLedgerMatchesCount(built.result, built.withheld);
     // The research this was built from must still be the research it was reserved for.
-    const now = await currentEvidenceVersion(prospectId.toLowerCase(), deps.database);
+    const now = await currentEvidenceVersion(
+      prospectId.toLowerCase(),
+      deps.database,
+    );
     if (now?.fingerprint !== reservation.fingerprint)
-      throw new AssessmentOutputError("Research changed during the assessment.");
+      throw new AssessmentOutputError(
+        "Research changed during the assessment.",
+      );
   } catch (error) {
     await endAssessmentWithoutResult(
       reservation.id,

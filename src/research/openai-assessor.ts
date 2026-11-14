@@ -23,7 +23,9 @@ export type { AssessmentCategoryId } from "./intake-evidence.js";
 const evidenceCatalog = () =>
   ASSESSMENT_CATEGORY_IDS.map(
     (category) =>
-      `${category}: ${OBSERVATION_TYPES.filter((type) => type.category === category)
+      `${category}: ${OBSERVATION_TYPES.filter(
+        (type) => type.category === category,
+      )
         .map((type) => `${type.id} (${type.label})`)
         .join(", ")}`,
   ).join("; ");
@@ -67,7 +69,10 @@ const unknownEnum = { type: "string", enum: [...UNKNOWN_IDS] };
 const unknownList = { type: "array", items: unknownEnum };
 // A hypothesis references evidence the model reported and an unknown; the server
 // composes the sentence, so it carries no prose from the model.
-const evidenceRef = { type: "string", enum: [...OBSERVATION_TYPE_IDS, ...FIT_SIGNAL_IDS] };
+const evidenceRef = {
+  type: "string",
+  enum: [...OBSERVATION_TYPE_IDS, ...FIT_SIGNAL_IDS],
+};
 const hypothesisList = {
   type: "array",
   items: {
@@ -185,7 +190,8 @@ export function createOpenAIAssessor(
       "OPENAI_API_KEY and explicit RELAY_RESEARCH_MODEL are required.",
     );
   return async (sources) => {
-    if (!sources.length) throw new Error("Assessment requires retrieved sources.");
+    if (!sources.length)
+      throw new Error("Assessment requires retrieved sources.");
     const content = JSON.stringify({ sources });
     if (Buffer.byteLength(content) > 150000)
       throw new Error("Assessment input is too large.");

@@ -57,7 +57,8 @@ const PHONE_NUMBER = /\b\d{3}[-. ]\d{3,4}(?:[-. ]\d{4})?\b/g;
 const SERVICE_WORDS =
   /\b(?:repair|installation|install|maintenance|replacement|inspection|cleaning|plumbing|heating|cooling|electrical|roofing|drain|remodeling)\b/gi;
 const distinct = (text: string, pattern: RegExp) =>
-  new Set([...text.matchAll(pattern)].map((match) => match[0].toLowerCase())).size;
+  new Set([...text.matchAll(pattern)].map((match) => match[0].toLowerCase()))
+    .size;
 
 export const COMPLEXITY_SIGNALS = [
   {
@@ -70,8 +71,11 @@ export const COMPLEXITY_SIGNALS = [
       // can describe a request, so it needs an offer of service: an emergency service, an around-the-clock
       // service, or a named same-day or after-hours service.
       EMERGENCY_SERVICE.test(q) ||
-      /\b(?:24\s*[\/-]\s*7|24[- ]hours?|round[- ]the[- ]clock|around the clock)\s+(?:service|support|repair|dispatch|availability)\b|\b(?:service|calls?)\s+(?:is|are)\s+(?:available|answered)\s+(?:24\s*[\/-]\s*7|24 hours|around the clock)\b|\b(?:after[- ]hours?|same[- ]day|weekend|night(?:time)?)\s+(?:service|repairs?|heating|cooling)\b|\bon[- ]call\s+(?:technicians?|crew|team|service)\b/i.test(q),
-    statement: "The website refers to urgent, emergency, or after-hours service.",
+      /\b(?:24\s*[\/-]\s*7|24[- ]hours?|round[- ]the[- ]clock|around the clock)\s+(?:service|support|repair|dispatch|availability)\b|\b(?:service|calls?)\s+(?:is|are)\s+(?:available|answered)\s+(?:24\s*[\/-]\s*7|24 hours|around the clock)\b|\b(?:after[- ]hours?|same[- ]day|weekend|night(?:time)?)\s+(?:service|repairs?|heating|cooling)\b|\bon[- ]call\s+(?:technicians?|crew|team|service)\b/i.test(
+        q,
+      ),
+    statement:
+      "The website refers to urgent, emergency, or after-hours service.",
     label: "Urgent, emergency, or explicit after-hours service",
     description:
       "time-sensitive services, emergency requests, or explicitly stated after-hours availability",
@@ -91,7 +95,9 @@ export const COMPLEXITY_SIGNALS = [
   {
     id: "multiple_locations",
     shows: (q: string) =>
-      /\b(?:multiple|several|two|three|four|many)\s+(?:locations|offices|branches|shops|stores|service centers?)\b|\b(?:locations|offices|branches|shops|stores|service centers?)\s+in\s+[^.\n]+\s+and\s+[^.\n]+/i.test(q),
+      /\b(?:multiple|several|two|three|four|many)\s+(?:locations|offices|branches|shops|stores|service centers?)\b|\b(?:locations|offices|branches|shops|stores|service centers?)\s+in\s+[^.\n]+\s+and\s+[^.\n]+/i.test(
+        q,
+      ),
     statement: "The website refers to more than one office or location.",
     label: "Multiple offices or locations",
     description: "more than one office or location",
@@ -99,7 +105,9 @@ export const COMPLEXITY_SIGNALS = [
   {
     id: "broad_service_territory",
     shows: (q: string) =>
-      /\b(?:statewide|nationwide|regional|metro area|multiple counties|several counties|surrounding areas|service areas)\b|\b(?:serving|serves)\s+[^.\n]+\s+and\s+[^.\n]+/i.test(q),
+      /\b(?:statewide|nationwide|regional|metro area|multiple counties|several counties|surrounding areas|service areas)\b|\b(?:serving|serves)\s+[^.\n]+\s+and\s+[^.\n]+/i.test(
+        q,
+      ),
     statement: "The website describes a broad or multi-area service territory.",
     label: "Broad service territory",
     description: "a broad or multi-area geographic service territory",
@@ -107,7 +115,10 @@ export const COMPLEXITY_SIGNALS = [
   {
     id: "multiple_service_categories",
     shows: (q: string) =>
-      distinct(q, SERVICE_WORDS) >= 2 || /\bresidential\b[\s\S]*\bcommercial\b|\bcommercial\b[\s\S]*\bresidential\b/i.test(q),
+      distinct(q, SERVICE_WORDS) >= 2 ||
+      /\bresidential\b[\s\S]*\bcommercial\b|\bcommercial\b[\s\S]*\bresidential\b/i.test(
+        q,
+      ),
     statement: "The website describes several distinct service categories.",
     label: "Multiple service categories",
     description: "several distinct service categories",
@@ -115,7 +126,9 @@ export const COMPLEXITY_SIGNALS = [
   {
     id: "visible_team_structure",
     shows: (q: string) =>
-      /\b(?:our team|team members?|owner|president|general manager|operations manager|office manager|sales manager|dispatchers?|technicians|estimators?|founder|director|leadership|staff)\b/i.test(q),
+      /\b(?:our team|team members?|owner|president|general manager|operations manager|office manager|sales manager|dispatchers?|technicians|estimators?|founder|director|leadership|staff)\b/i.test(
+        q,
+      ),
     statement: "The website shows a team or leadership structure.",
     label: "Visible team structure",
     description: "a publicly visible team or leadership structure",
@@ -123,8 +136,11 @@ export const COMPLEXITY_SIGNALS = [
   {
     id: "coordination_or_handoffs",
     shows: (q: string) =>
-      /\b(?:dispatch\w*|rout(?:e|ed|ing)|assign\w*|coordinat\w*|hand-?off|estimators?|referr\w*|follow-?up|call-?back)\b|\bwe(?:'ll| will) (?:call|contact|get back|reach out)\b/i.test(q),
-    statement: "The website refers to dispatch, routing, or coordination between people.",
+      /\b(?:dispatch\w*|rout(?:e|ed|ing)|assign\w*|coordinat\w*|hand-?off|estimators?|referr\w*|follow-?up|call-?back)\b|\bwe(?:'ll| will) (?:call|contact|get back|reach out)\b/i.test(
+        q,
+      ),
+    statement:
+      "The website refers to dispatch, routing, or coordination between people.",
     label: "Requests that may need routing or handoffs",
     description:
       "customer requests that appear to require coordination, routing, or handoffs between people or teams",
@@ -132,8 +148,11 @@ export const COMPLEXITY_SIGNALS = [
   {
     id: "visible_demand_generation",
     shows: (q: string) =>
-      /\b(?:reviews?|testimonials?|rated|stars?|awards?|advertis\w*|promotions?|coupons?|special offers?|financing)\b/i.test(q),
-    statement: "The website shows demand-generation activity such as reviews, promotions, or financing.",
+      /\b(?:reviews?|testimonials?|rated|stars?|awards?|advertis\w*|promotions?|coupons?|special offers?|financing)\b/i.test(
+        q,
+      ),
+    statement:
+      "The website shows demand-generation activity such as reviews, promotions, or financing.",
     label: "Visible demand-generation activity",
     description: "strong, publicly visible demand-generation activity",
   },
@@ -145,8 +164,10 @@ export const LIMITED_RELEVANCE_SIGNALS = [
   {
     id: "limited_inbound_demand",
     requiresStatement: true,
-    shows: (q: string) => /\b(?:referral[- ]only|by referral only|invitation[- ]only)\b/i.test(q),
-    statement: "The website states that the business works by referral or limits new customers.",
+    shows: (q: string) =>
+      /\b(?:referral[- ]only|by referral only|invitation[- ]only)\b/i.test(q),
+    statement:
+      "The website states that the business works by referral or limits new customers.",
     label: "Affirmative evidence of little inbound demand",
     description:
       "a public statement showing little meaningful inbound customer demand",
@@ -157,8 +178,11 @@ export const LIMITED_RELEVANCE_SIGNALS = [
     // The business says its own way of being reached is exclusive: "the only way to reach us",
     // "by phone only". A bare "only" or "call only during business hours" is not that.
     shows: (q: string) =>
-      /\b(?:the|our) only (?:way|method|means) (?:to|of) (?:reach|contact|book|schedule|request)\b|\bby (?:phone|appointment|referral) only\b|\bwe (?:only|exclusively) (?:take|accept|book|schedule) (?:requests |bookings |appointments |jobs )?(?:by|through|via) (?:phone|referral|appointment)\b/i.test(q),
-    statement: "The website describes a single, exclusive way to reach the business.",
+      /\b(?:the|our) only (?:way|method|means) (?:to|of) (?:reach|contact|book|schedule|request)\b|\bby (?:phone|appointment|referral) only\b|\bwe (?:only|exclusively) (?:take|accept|book|schedule) (?:requests |bookings |appointments |jobs )?(?:by|through|via) (?:phone|referral|appointment)\b/i.test(
+        q,
+      ),
+    statement:
+      "The website describes a single, exclusive way to reach the business.",
     label: "Affirmatively simple intake",
     description:
       "a public statement showing genuinely simple intake, such as stating that one channel is the only way customers reach the business",
@@ -169,8 +193,11 @@ export const LIMITED_RELEVANCE_SIGNALS = [
     // Self-description only: "We are a volunteer-run nonprofit". Donating to one, or "no cost to
     // customers" for an estimate, says nothing about the business's own economics.
     shows: (q: string) =>
-      /\b(?:we are (?:an? )?(?:all[- ])?volunteer|volunteer[- ](?:run|led|based)|we are (?:an? )?non-?profit|we are a (?:free|charitable) (?:clinic|service)|our (?:service|clinic) is (?:entirely )?free of charge)\b/i.test(q),
-    statement: "The website describes a volunteer, nonprofit, or free-of-charge operation.",
+      /\b(?:we are (?:an? )?(?:all[- ])?volunteer|volunteer[- ](?:run|led|based)|we are (?:an? )?non-?profit|we are a (?:free|charitable) (?:clinic|service)|our (?:service|clinic) is (?:entirely )?free of charge)\b/i.test(
+        q,
+      ),
+    statement:
+      "The website describes a volunteer, nonprofit, or free-of-charge operation.",
     label: "Affirmative evidence of poor economic fit",
     description: "a public statement showing poor apparent economic fit",
   },
@@ -180,8 +207,11 @@ export const LIMITED_RELEVANCE_SIGNALS = [
     // Self-description of a different kind of business: "We are an online store". A product, a
     // brand, or a supply relationship ("authorized dealer", "restaurant supply") is not that.
     shows: (q: string) =>
-      /\bwe (?:are|operate) (?:an? )?(?:online store|e-?commerce (?:store|business|company)|restaurant(?!\s+(?:supply|equipment|hvac|refrigeration|service|repair|install\w*))|software company|saas company|retailer|wholesaler)\b/i.test(q),
-    statement: "The website describes a business that is not a typical service business.",
+      /\bwe (?:are|operate) (?:an? )?(?:online store|e-?commerce (?:store|business|company)|restaurant(?!\s+(?:supply|equipment|hvac|refrigeration|service|repair|install\w*))|software company|saas company|retailer|wholesaler)\b/i.test(
+        q,
+      ),
+    statement:
+      "The website describes a business that is not a typical service business.",
     label: "Affirmative evidence of little relevance to Relay's offer",
     description:
       "a public statement showing the business is not the kind of service business Relay's current offer serves",
@@ -200,7 +230,9 @@ export const FIT_SIGNAL_IDS = SIGNALS.map((signal) => signal.id) as [
 ];
 export const signalLabel = (id: FitSignalId): string =>
   SIGNALS.find((signal) => signal.id === id)!.label;
-export const signalKind = (id: FitSignalId): "complexity" | "limited_relevance" =>
+export const signalKind = (
+  id: FitSignalId,
+): "complexity" | "limited_relevance" =>
   COMPLEXITY_SIGNALS.some((signal) => signal.id === id)
     ? "complexity"
     : "limited_relevance";
@@ -242,7 +274,9 @@ export function classifyFit(input: {
   if (input.verifiedObservations < FIT_THRESHOLDS.minVerifiedObservations)
     return { grade: "Unassessed", basis: "insufficient_evidence" };
   const distinct = new Set(input.signalIds);
-  const complexity = [...distinct].filter((id) => signalKind(id) === "complexity").length;
+  const complexity = [...distinct].filter(
+    (id) => signalKind(id) === "complexity",
+  ).length;
   const limited = distinct.size - complexity;
   if (complexity && limited) return { grade: "B", basis: "mixed_evidence" };
   if (complexity >= FIT_THRESHOLDS.minComplexitySignalsForA)
@@ -273,12 +307,19 @@ export function signalSupport(
     ? signal.shows(normalized.join("\n"))
       ? quotes.map((_, index) => index)
       : []
-    : normalized.flatMap((quote, index) => (signal.shows(quote) ? [index] : []));
+    : normalized.flatMap((quote, index) =>
+        signal.shows(quote) ? [index] : [],
+      );
   if (!showing.length) return "unsupported";
   const verdicts = showing.map((index) =>
-    judgeQuote(quotes[index]!, contexts ? contexts[index] : undefined, { requiresStatement: signal.requiresStatement }),
+    judgeQuote(quotes[index]!, contexts ? contexts[index] : undefined, {
+      requiresStatement: signal.requiresStatement,
+    }),
   );
-  if (signal.joined) return verdicts.every((verdict) => verdict === "supported") ? "supported" : "ambiguous";
+  if (signal.joined)
+    return verdicts.every((verdict) => verdict === "supported")
+      ? "supported"
+      : "ambiguous";
   return verdicts.includes("supported") ? "supported" : "ambiguous";
 }
 export const signalStatement = (id: FitSignalId): string =>
@@ -297,7 +338,8 @@ const ACCUSATORY =
   /\b(?:why (?:don'?t|aren'?t|can'?t|won'?t)|you (?:never|fail|ignore|lose|miss)|(?:are|is) (?:you|they|your team) (?:losing|missing|ignoring)|too slow|ignor\w*|poor(?:ly)?|slow(?:ly)? to|losing|missed|missing|nobody|no one)\b/i;
 // A question may not carry an invented figure, or presuppose a failure the site never showed.
 // ("24/7" is a service description, not a figure about the business, so it is set aside first.)
-const FIGURES = /\d|\bpercent\b|%|\$|\b(?:monthly|weekly|daily|per (?:month|week|day|year)|dozens?|hundreds?|thousands?|twenty|thirty|forty|fifty|half of|most of)\b/i;
+const FIGURES =
+  /\d|\bpercent\b|%|\$|\b(?:monthly|weekly|daily|per (?:month|week|day|year)|dozens?|hundreds?|thousands?|twenty|thirty|forty|fifty|half of|most of)\b/i;
 const PRESUPPOSES_FAILURE =
   /\b(?:voicemail|forget|forgets|forgot|forgotten|drops?|dropped|goes? elsewhere|go elsewhere|slow|lazy|neglect\w*|abandon\w*|lose|loses|lost|complain\w*|overwhelmed|backlog|falls? through|cracks|going cold|on hold|slipping|slips? through|unanswered|no reply|never get)\b/i;
 export const DISCOVERY_QUESTION_LIMITS = { min: 15, max: 300 } as const;
@@ -322,8 +364,10 @@ export function discoveryQuestionProblem(
     (scope === "primary" && TOOLING.test(question))
   )
     return "leads_with_technology";
-  if (ACCUSATORY.test(question) || PRESUPPOSES_FAILURE.test(question)) return "accusatory";
-  if (FIGURES.test(question.replace(/\b24\s*[\/-]\s*7\b/g, ""))) return "contains_figure";
+  if (ACCUSATORY.test(question) || PRESUPPOSES_FAILURE.test(question))
+    return "accusatory";
+  if (FIGURES.test(question.replace(/\b24\s*[\/-]\s*7\b/g, "")))
+    return "contains_figure";
   return null;
 }
 
@@ -339,9 +383,9 @@ export function fitRubricInstructions(): string {
     `Limited-relevance signals: ${list(LIMITED_RELEVANCE_SIGNALS)}. ` +
     "Report a limited-relevance signal only for AFFIRMATIVE evidence. A capability that is not mentioned is an unknown, never a reason for weak fit. " +
     "Name unknowns by id only. Economic value, lead volume, booking rate, and response time are unknowns unless an excerpt directly says otherwise; never state them yourself. " +
-    "Interface text such as dropdown options, menu items, or button labels (often joined without spaces, like \"availableThis\") shows what a form offers, not what the business does: do not cite it for a signal such as emergency service. " +
+    'Interface text such as dropdown options, menu items, or button labels (often joined without spaces, like "availableThis") shows what a form offers, not what the business does: do not cite it for a signal such as emergency service. ' +
     "Never put an internal id (anything_with_underscores) in a discovery question. " +
-    "HYPOTHESIS STANDARD: observed public evidence plus an operational unknown is a discovery opportunity. A hypothesis is just two ids: one observed evidence id (an observation type or signal you reported, which the server accepted) and one unknown id. You do not write the sentence: the server composes it in the original form, observed evidence followed by \"so it may be worth understanding\" the unknown, so it can never state a conclusion or turn an unknown into a claim. A hypothesis that cites evidence the server rejected is withheld. " +
+    'HYPOTHESIS STANDARD: observed public evidence plus an operational unknown is a discovery opportunity. A hypothesis is just two ids: one observed evidence id (an observation type or signal you reported, which the server accepted) and one unknown id. You do not write the sentence: the server composes it in the original form, observed evidence followed by "so it may be worth understanding" the unknown, so it can never state a conclusion or turn an unknown into a claim. A hypothesis that cites evidence the server rejected is withheld. ' +
     "DISCOVERY QUESTION STANDARD: the primary discovery question exposes the operational process behind the strongest observed signal. It is one specific question that an owner or manager can easily answer, does not accuse the business of a problem, does not mention AI, automation, or software tools, does not use words like missing, missed, or losing, and asks what actually happens (routing, ownership, response, follow-up, or visibility). " +
     'Good: "When someone uses the web form instead of calling, what happens from there?" or "How do you make sure an urgent request reaches the right person after hours?" Bad: "Are you interested in automation?" '
   );

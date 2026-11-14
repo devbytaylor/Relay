@@ -17,10 +17,7 @@ export type AskRelayResult = {
   question: string;
   status: "answered" | "insufficient_evidence";
   reason:
-    | null
-    | "no_indexed_research"
-    | "model_reported"
-    | "unverified_citations";
+    null | "no_indexed_research" | "model_reported" | "unverified_citations";
   answer: string;
   // Present only for verified answers. URLs come from stored chunks, never
   // from the model.
@@ -149,7 +146,8 @@ export function citationsVerified(
   draft.citations.forEach((citation, citationIndex) => {
     const source = sources.find((item) => item.id === citation.source);
     const quote = normalized(citation.quote);
-    if (source && quote.length >= 4 && quoteInSource(quote, source.text)) return;
+    if (source && quote.length >= 4 && quoteInSource(quote, source.text))
+      return;
     verified = false;
     const sourceText = source ? normalized(source.text) : "";
     const anchor = quote

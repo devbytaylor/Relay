@@ -23,6 +23,8 @@ export function requirePipelineVersion(value: unknown): number {
     !Number.isSafeInteger(value) ||
     value < BASELINE_ASSESSMENT_PIPELINE_VERSION
   )
-    throw new Error("Assessment pipeline version must be an integer of at least 1.");
+    throw new Error(
+      "Assessment pipeline version must be an integer of at least 1.",
+    );
   return value;
 }
