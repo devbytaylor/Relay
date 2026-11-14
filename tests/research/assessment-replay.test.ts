@@ -56,6 +56,18 @@ test("the saved live model output is replayed with the phone number and the foll
   assert.equal(withheld, 1);
   assert.equal(result.withheld, 1);
   assert.deepEqual(result.unconfirmed, []);
+  // The ledger accounts for exactly that one item: a real quote that does not show a broad service territory.
+  assert.deepEqual(result.diagnostics!.withheld, [
+    {
+      field: "fit_signals",
+      index: 2,
+      claim: "broad_service_territory",
+      reason: "claim_not_shown_by_quote",
+      cause: "unsupported_claim",
+      sources: [{ sourceId: "S9", chunkId: "chunk-S9" }],
+      excerpt: "We serve homes and commercial properties in Linden and surrounding New Jersey c\u2026",
+    },
+  ]);
 });
 
 test("the grade stays A on the same signals, and the phone number does not change it", () => {

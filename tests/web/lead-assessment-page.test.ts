@@ -332,3 +332,30 @@ test("a withheld primary hypothesis falls back to the first accepted opportunity
   hostile.topOpportunities[0]!.title = "<b>x</b>";
   assert.doesNotMatch(page(indexed, history(record({ result: hostile }))), /<b>x<\/b>/);
 });
+
+test("the rejection ledger is operator diagnostics: it is never shown, and results saved without it render unchanged", () => {
+  const withLedger = structuredClone(built.result);
+  assert.deepEqual(withLedger.diagnostics!.withheld.length, withLedger.withheld);
+  assert.equal(withLedger.schemaVersion, 3);
+  // An assessment saved before the ledger existed has no diagnostics at all.
+  const legacy = structuredClone(built.result);
+  delete legacy.diagnostics;
+  assert.equal(legacy.schemaVersion, 3);
+  assert.equal(page(indexed, history(record({ result: withLedger }))), page(indexed, history(record({ result: legacy }))));
+
+  // Nothing in the ledger reaches the page, even if it holds text that would be markup or look like a finding.
+  const poisoned = structuredClone(withLedger);
+  poisoned.withheld = 1;
+  poisoned.diagnostics = {
+    withheld: [{ field: "observations", index: 0, claim: "contact_form_offered", reason: "claim_not_shown_by_quote", cause: "unsupported_claim", excerpt: "LEDGER-MARKER <b>x</b>", sources: [{ sourceId: "S1", chunkId: "chunk-LEDGER" }] }],
+  };
+  const html = page(indexed, history(record({ result: poisoned })));
+  assert.doesNotMatch(html, /LEDGER-MARKER|claim_not_shown_by_quote|unsupported_claim|chunk-LEDGER|diagnostics/);
+  // The ordinary withheld notice is unchanged: a count and an explanation, no reasons.
+  assert.match(html, /1 model output was withheld because the quote did not support the claim/);
+
+  // A malformed ledger cannot break rendering either.
+  const malformed = structuredClone(withLedger) as unknown as { diagnostics: unknown };
+  malformed.diagnostics = "not a ledger";
+  assert.doesNotThrow(() => page(indexed, history(record({ result: malformed as never }))));
+});

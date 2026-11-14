@@ -6,6 +6,7 @@ import {
   requirePipelineVersion,
 } from "../research/assessment-pipeline.js";
 import { FIT_RUBRIC_VERSION } from "../research/fit-rubric.js";
+import { assertLedgerMatchesCount } from "../research/withheld-ledger.js";
 import { RESEARCH_EMBEDDING_MODEL } from "../research/openai-embeddings.js";
 
 type Database = Pick<Pool, "query">;
@@ -260,6 +261,8 @@ export async function completeAssessment(
   withheldCount: number,
   database: Database,
 ): Promise<void> {
+  // A stored rejection ledger must account for exactly the withheld count being recorded.
+  assertLedgerMatchesCount(result, withheldCount);
   const updated = await database.query(
     `UPDATE lead_intake_assessments
     SET status = 'completed', result = $2, withheld_count = $3,

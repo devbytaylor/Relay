@@ -36,7 +36,7 @@ import {
   enclosingText,
   findPhoneNumber,
   isInstructionLike,
-  isSuspiciousText,
+  suspiciousTextReason,
   observationStatement,
   observationSupport,
   observationType,
@@ -50,6 +50,14 @@ import {
   type UnknownId,
 } from "./intake-evidence.js";
 import { isResearchEmbedding, type Embedder } from "./openai-embeddings.js";
+import {
+  assertLedgerMatchesCount,
+  withheldEntry,
+  type EvidenceStatus,
+  type WithheldEntry,
+  type WithheldField,
+  type WithheldInput,
+} from "./withheld-ledger.js";
 
 // Retrieval bounds. Vector results fill each category up to perCategory; keyword
 // results reserve up to keywordPerCategory of those slots, so the evidence budget
@@ -319,6 +327,9 @@ export type AssessmentResult = {
   // via: whether vector search, keyword search, or both found the excerpt.
   sources: { sourceId: string; sourceUrl: string; flagged: boolean; via: EvidenceVia }[];
   withheld: number;
+  // Operator diagnostics, never rendered in the assessment page: one entry per withheld item, so
+  // withheld === diagnostics.withheld.length. Absent from assessments saved before the ledger existed.
+  diagnostics?: { withheld: WithheldEntry[] };
 };
 
 export type RetrievedSource = AnswerSource & { chunkId: string; via: EvidenceVia };
@@ -464,7 +475,11 @@ export function buildAssessmentResult(
   draft: Draft,
   retrieved: readonly RetrievedSource[],
 ): { result: AssessmentResult; withheld: number } {
-  let withheld = 0;
+  // Every withheld item gets exactly one ledger entry, and `withheld` is the ledger's size.
+  const ledger: WithheldEntry[] = [];
+  const withhold = (input: WithheldInput) => void ledger.push(withheldEntry(input));
+  // Evidence the model reported and the server withheld, so a hypothesis resting on it can say so.
+  const rejectedClaims = new Set<string>();
   const unconfirmed: Unconfirmed[] = [];
   // A quote is verbatim in the stored source, or in the source with verified telephone links
   // read as their labels ("Call 555-0100" for "Call [555-0100](tel:+15550100)"). The quote is
@@ -488,10 +503,20 @@ export function buildAssessmentResult(
     });
   // Real quotes only (verbatim in the stored source), and never text that tries to
   // steer the assessment. Normalization happens later, only to interpret the quote.
-  const usable = (cites: Cite[]) =>
-    cites.length > 0 &&
-    !cites.some((cite) => isInstructionLike(cite.quote)) &&
-    verified(cites);
+  const citationProblem = (cites: Cite[]): "no_citations" | "instruction_like_quote" | "quote_not_verbatim" | null =>
+    cites.length === 0
+      ? "no_citations"
+      : cites.some((cite) => isInstructionLike(cite.quote))
+        ? "instruction_like_quote"
+        : verified(cites)
+          ? null
+          : "quote_not_verbatim";
+  const sourcesOf = (cites: Cite[]) => [
+    ...new Map(
+      cites.map((cite) => [cite.source, { sourceId: cite.source, chunkId: retrieved.find((item) => item.id === cite.source)!.chunkId }]),
+    ).values(),
+  ];
+  const quotesOf = (cites: Cite[]) => cites.map((cite) => cite.quote).join(" | ");
   // The stored text around each quote. Hedges and interface labels are read from here, so a
   // shortened or re-cased quote cannot hide them. A quote that cannot be located is never supported.
   const sourceText = (id: string) => retrieved.find((item) => item.id === id)!.text;
@@ -503,10 +528,35 @@ export function buildAssessmentResult(
     );
     if (!repeated && unconfirmed.length < MAX_UNCONFIRMED) unconfirmed.push({ scope, id, label, citations });
   };
-  const keepQuestion = (scope: "primary" | "category") => (value: string) => {
-    const ok = discoveryQuestionProblem(value, scope) === null && !isSuspiciousText(value);
-    if (!ok) withheld++;
-    return ok;
+  const QUESTION_REASONS = {
+    length: "question_length",
+    not_one_question: "question_not_one_question",
+    not_a_process_question: "question_not_a_process_question",
+    leads_with_technology: "question_leads_with_technology",
+    accusatory: "question_accusatory",
+    contains_figure: "question_contains_figure",
+  } as const;
+  const SUSPICIOUS_REASONS = {
+    instruction_like: "question_instruction_like",
+    markup_or_link: "question_markup_or_link",
+    internal_id: "question_internal_id",
+  } as const;
+  // The discovery question standard and the model-text standard. Returns true when the question passes.
+  const meetsQuestionStandard = (
+    value: string,
+    scope: "primary" | "category",
+    at: { field: WithheldField; category?: AssessmentCategoryId; index: number },
+  ): boolean => {
+    const problem = discoveryQuestionProblem(value, scope) as keyof typeof QUESTION_REASONS | null;
+    const suspicious = suspiciousTextReason(value);
+    if (problem === null && suspicious === null) return true;
+    // Hostile text (instruction-like, links, markup) is named as such first, so none of it is recorded.
+    const hostile = suspicious === "instruction_like" || suspicious === "markup_or_link";
+    withhold({
+      ...at,
+      reason: hostile ? SUSPICIOUS_REASONS[suspicious] : problem !== null ? QUESTION_REASONS[problem] : SUSPICIOUS_REASONS[suspicious!],
+    });
+    return false;
   };
   // The observation types the server accepted. A question naming a website feature (a form, online
   // booking, a portal, online payment) is asked only when one of them shows that feature.
@@ -520,11 +570,27 @@ export function buildAssessmentResult(
   for (const definition of ASSESSMENT_CATEGORIES) {
     const entry = draft.categories.find((item) => item.category === definition.id)!;
     const observations: AssessmentResult["categories"][number]["observations"] = [];
-    for (const item of entry.observations) {
+    for (const [position, item] of entry.observations.entries()) {
       const type = observationType(item.type)!;
       const quotes = item.citations.map((cite) => cite.quote);
-      if (type.category !== definition.id || !usable(item.citations)) {
-        withheld++;
+      const problem = citationProblem(item.citations);
+      const at = {
+        field: "observations" as const,
+        category: definition.id,
+        index: position,
+        claim: type.id,
+        sources: sourcesOf(item.citations),
+        // Only a quote verified verbatim in the stored source is excerpted.
+        ...(problem === null ? { excerpt: quotesOf(item.citations) } : {}),
+      };
+      if (type.category !== definition.id) {
+        withhold({ ...at, reason: "observation_wrong_category" });
+        rejectedClaims.add(type.id);
+        continue;
+      }
+      if (problem) {
+        withhold({ ...at, reason: problem });
+        rejectedClaims.add(type.id);
         continue;
       }
       // A number the source's own telephone link contradicts is not shown by that source.
@@ -535,7 +601,8 @@ export function buildAssessmentResult(
           return number !== null && phoneNumberContradicted(sourceText(cite.source), number);
         })
       ) {
-        withheld++;
+        withhold({ ...at, reason: "phone_number_contradicted" });
+        rejectedClaims.add(type.id);
         continue;
       }
       const support = observationSupport(type, quotes, contextsFor(item.citations));
@@ -543,8 +610,13 @@ export function buildAssessmentResult(
         unconfirm("observation", type.id, type.label, item.citations);
         continue;
       }
-      if (support === "unsupported" || observations.some((seen) => seen.type === type.id)) {
-        withheld++;
+      if (support === "unsupported") {
+        withhold({ ...at, reason: "claim_not_shown_by_quote" });
+        rejectedClaims.add(type.id);
+        continue;
+      }
+      if (observations.some((seen) => seen.type === type.id)) {
+        withhold({ ...at, reason: "duplicate_observation_type" });
         continue;
       }
       observations.push({
@@ -562,13 +634,22 @@ export function buildAssessmentResult(
   // on overlapping text.
   const claimed: { quote: string; signal: FitSignalId }[] = [];
   const signals: AssessmentResult["fit"]["signals"] = [];
-  for (const item of draft.fit.signals) {
+  for (const [position, item] of draft.fit.signals.entries()) {
     const quotes = item.citations.map((cite) => normalizedQuote(cite.quote));
     const shared = quotes.some((quote) =>
       claimed.some((prior) => prior.signal !== item.signal && overlaps(quote, prior.quote)),
     );
-    if (!usable(item.citations) || shared) {
-      withheld++;
+    const problem = citationProblem(item.citations);
+    const at = {
+      field: "fit_signals" as const,
+      index: position,
+      claim: item.signal,
+      sources: sourcesOf(item.citations),
+      ...(problem === null ? { excerpt: quotesOf(item.citations) } : {}),
+    };
+    if (problem || shared) {
+      withhold({ ...at, reason: problem ?? "signal_quote_shared" });
+      rejectedClaims.add(item.signal);
       continue;
     }
     const support = signalSupport(item.signal, item.citations.map((cite) => cite.quote), contextsFor(item.citations));
@@ -577,7 +658,8 @@ export function buildAssessmentResult(
       continue;
     }
     if (support === "unsupported") {
-      withheld++;
+      withhold({ ...at, reason: "claim_not_shown_by_quote" });
+      rejectedClaims.add(item.signal);
       continue;
     }
     for (const quote of quotes) claimed.push({ quote, signal: item.signal });
@@ -599,10 +681,31 @@ export function buildAssessmentResult(
     if (signal) return signal;
     return accepted.find((item) => item.type === ref && (!category || observationType(ref)!.category === category)) ?? null;
   };
-  const grounded = (item: DraftHypothesis, category: AssessmentCategoryId, scoped: boolean): Hypothesis | null => {
+  const grounded = (
+    item: DraftHypothesis,
+    category: AssessmentCategoryId,
+    scoped: boolean,
+    at: { field: "category_hypotheses" | "primary_hypothesis" | "top_opportunities"; index: number },
+  ): Hypothesis | null => {
     const observed = accept(item.observed, scoped ? category : undefined);
     if (!observed) {
-      withheld++;
+      // Say what became of the evidence it cited, so the rejection is never opaque.
+      const elsewhere = scoped && accept(item.observed) !== null;
+      const evidenceStatus: EvidenceStatus = elsewhere
+        ? "accepted_in_other_category"
+        : rejectedClaims.has(item.observed)
+          ? "rejected"
+          : unconfirmed.some((entry) => entry.id === item.observed)
+            ? "unconfirmed"
+            : "not_reported";
+      withhold({
+        ...at,
+        category,
+        claim: item.observed,
+        unknown: item.unknown,
+        evidenceStatus,
+        reason: elsewhere ? "hypothesis_evidence_wrong_category" : "hypothesis_evidence_not_accepted",
+      });
       return null;
     }
     return {
@@ -618,8 +721,8 @@ export function buildAssessmentResult(
   const categories = ASSESSMENT_CATEGORIES.map((definition) => {
     const entry = draft.categories.find((item) => item.category === definition.id)!;
     const hypotheses: string[] = [];
-    for (const item of entry.hypotheses) {
-      const kept = grounded(item, definition.id, true);
+    for (const [position, item] of entry.hypotheses.entries()) {
+      const kept = grounded(item, definition.id, true, { field: "category_hypotheses", index: position });
       if (kept && !hypotheses.includes(kept.statement)) hypotheses.push(kept.statement);
     }
     return {
@@ -628,29 +731,32 @@ export function buildAssessmentResult(
       observations: observationsByCategory.get(definition.id)!,
       unknowns: unknownsOf(entry.unknowns),
       hypotheses,
-      discoveryQuestions: entry.discoveryQuestions
-        .filter(keepQuestion("category"))
-        .filter((question) => {
-          // Not asked: it presupposes a website feature the accepted evidence does not show.
-          const ungrounded = ungroundedQuestionFeature(question, types) !== null;
-          if (ungrounded) withheld++;
-          return !ungrounded;
-        }),
+      discoveryQuestions: entry.discoveryQuestions.filter((question, index) => {
+        const at = { field: "category_questions" as const, category: definition.id, index };
+        if (!meetsQuestionStandard(question, "category", at)) return false;
+        // Not asked: it presupposes a website feature the accepted evidence does not show.
+        const feature = ungroundedQuestionFeature(question, types);
+        if (feature === null) return true;
+        withhold({ ...at, reason: "question_unsupported_premise", feature });
+        return false;
+      }),
     };
   });
-  const primary = grounded(draft.primary, draft.primary.category, false);
+  const primary = grounded(draft.primary, draft.primary.category, false, { field: "primary_hypothesis", index: 0 });
   // A primary question that presupposes an unverified website feature is replaced by a channel-neutral
   // one the server wrote, which names no channel. A question that failed the style standard stays null.
   let primaryQuestion: string | null = null;
-  if (keepQuestion("primary")(draft.primaryQuestion)) {
-    if (ungroundedQuestionFeature(draft.primaryQuestion, types) === null) primaryQuestion = draft.primaryQuestion;
+  const primaryAt = { field: "primary_question" as const, index: 0 };
+  if (meetsQuestionStandard(draft.primaryQuestion, "primary", primaryAt)) {
+    const feature = ungroundedQuestionFeature(draft.primaryQuestion, types);
+    if (feature === null) primaryQuestion = draft.primaryQuestion;
     else {
-      withheld++;
+      withhold({ ...primaryAt, reason: "question_unsupported_premise", feature, replacedByNeutral: true });
       primaryQuestion = CHANNEL_NEUTRAL_PRIMARY_QUESTION;
     }
   }
-  const topOpportunities = draft.top.flatMap((item) => {
-    const kept = grounded(item, item.category, false);
+  const topOpportunities = draft.top.flatMap((item, position) => {
+    const kept = grounded(item, item.category, false, { field: "top_opportunities", index: position });
     return kept ? [{ ...kept, title: unknownTopic(item.unknown) }] : [];
   });
 
@@ -695,6 +801,8 @@ export function buildAssessmentResult(
     .filter(Boolean)
     .join(" ");
 
+  // The count is the ledger's size, so the two can never disagree.
+  const withheld = ledger.length;
   return {
     withheld,
     result: {
@@ -720,6 +828,7 @@ export function buildAssessmentResult(
         via: item.via,
       })),
       withheld,
+      diagnostics: { withheld: ledger },
     },
   };
 }
@@ -822,6 +931,7 @@ export async function generateLeadIntakeAssessment(
       parseAssessmentDraft(raw, sources.map((item) => item.id)),
       sources,
     );
+    assertLedgerMatchesCount(built.result, built.withheld);
     // The research this was built from must still be the research it was reserved for.
     const now = await currentEvidenceVersion(prospectId.toLowerCase(), deps.database);
     if (now?.fingerprint !== reservation.fingerprint)

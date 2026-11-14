@@ -7,6 +7,7 @@ import "../../scripts/check-test-database.js";
 import { createResearchDocument } from "../../src/data/canonical-data.js";
 import {
   AssessmentUnavailableError,
+  completeAssessment,
   listAssessments,
   MAX_ASSESSMENT_ATTEMPTS,
   reserveAssessment,
@@ -94,6 +95,9 @@ test("Lead intake assessments: durable, deduplicated, versioned, and fail-closed
     assert.equal(record.model, MODEL);
     assert.equal(record.withheldCount, 0);
     const result = record.result as any;
+    // The ledger is stored with the result, accounts for the recorded count, and leaves the version alone.
+    assert.deepEqual(result.diagnostics, { withheld: [] });
+    assert.equal(result.schemaVersion, 3);
     assert.equal(result.fit.grade, "A");
     assert.equal(result.fit.rubricVersion, "n8n-prospecting-fit-v5");
     assert.deepEqual(result.fit.signals.map((signal: { id: string }) => signal.id), ["urgent_or_emergency_service", "multiple_intake_paths"]);
@@ -269,6 +273,11 @@ test("Lead intake assessments: durable, deduplicated, versioned, and fail-closed
     assert.equal(record.status, "completed");
     assert.equal(record.withheldCount, 1);
     assert.ok(!JSON.stringify(record.result).includes("under a minute"));
+    // The ledger records why, as a code and the cited chunk, and still stores none of the invented text.
+    const ledger = (record.result as any).diagnostics.withheld;
+    assert.equal(ledger.length, record.withheldCount);
+    assert.deepEqual(ledger.map((entry: any) => [entry.field, entry.claim, entry.reason, entry.cause, entry.excerpt]), [["observations", "phone_number_listed", "quote_not_verbatim", "quote_verification", undefined]]);
+    assert.match(ledger[0].sources[0].chunkId, /^[0-9a-f-]{36}$/);
   });
 
   await t.test("a poisoned research page and an assessor that obeys it persist no injected content", async () => {
@@ -296,6 +305,23 @@ test("Lead intake assessments: durable, deduplicated, versioned, and fail-closed
     // No accepted signal, so the grade is derived as B (signals unclear), never the injected A or a C.
     assert.deepEqual([result.fit.grade, result.fit.basis], ["B", "signals_unclear"]);
     assert.ok(record.withheldCount >= 4);
+    // The count is the ledger's size, and none of the injected text is stored in it either.
+    assert.equal(result.diagnostics.withheld.length, record.withheldCount);
+    assert.ok(!JSON.stringify(result.diagnostics).includes("Ignore the rubric"));
+  });
+
+  await t.test("a result whose ledger does not account for the withheld count is refused and the run is not completed", async () => {
+    const { prospectId } = await prospect();
+    const reservation = await reserveAssessment(prospectId, { database, model: MODEL });
+    assert.equal(reservation.kind, "reserved");
+    const id = (reservation as { id: string }).id;
+    const mismatched = { schemaVersion: 3, withheld: 2, diagnostics: { withheld: [] } };
+    await assert.rejects(completeAssessment(id, mismatched, 2, database), /does not match its rejection ledger/);
+    const row = (await database.query("SELECT status, result, withheld_count FROM lead_intake_assessments WHERE id = $1", [id])).rows[0];
+    assert.deepEqual([row.status, row.result, row.withheld_count], ["generating", null, 0]);
+    // A result saved without a ledger (as before the ledger existed) is still accepted.
+    await completeAssessment(id, { schemaVersion: 3, withheld: 2 }, 2, database);
+    assert.equal((await database.query("SELECT status FROM lead_intake_assessments WHERE id = $1", [id])).rows[0].status, "completed");
   });
 
   await t.test("prospects without complete, ready, indexed research make no provider calls", async () => {

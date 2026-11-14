@@ -205,10 +205,15 @@ export const containsInternalId = (value: string) =>
   /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/i.test(value);
 // Model prose is withheld when it echoes instructions, carries links or markup,
 // or leaks an internal identifier.
-export const isSuspiciousText = (value: string) =>
-  isInstructionLike(value) ||
-  MARKUP_OR_LINK.test(lintable(value)) ||
-  containsInternalId(value);
+export const suspiciousTextReason = (value: string): "instruction_like" | "markup_or_link" | "internal_id" | null =>
+  isInstructionLike(value)
+    ? "instruction_like"
+    : MARKUP_OR_LINK.test(lintable(value))
+      ? "markup_or_link"
+      : containsInternalId(value)
+        ? "internal_id"
+        : null;
+export const isSuspiciousText = (value: string) => suspiciousTextReason(value) !== null;
 
 const ROUND_THE_CLOCK = /\b24\s*[\/-]\s*7\b|\b24[- ]hours?\b|\baround the clock\b|\bround[- ]the[- ]clock\b/i;
 const PHONE_WORDS = /\b(?:calls?|phones?|telephone|answer(?:s|ed|ing)?|dispatch\w*|line)\b/i;

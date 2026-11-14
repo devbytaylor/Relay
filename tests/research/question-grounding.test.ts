@@ -109,7 +109,16 @@ test("without accepted request evidence, Rafa's form question is not asked and t
   assert.deepEqual(result.categories.flatMap((item) => item.observations.map((observation) => observation.type)), ["phone_number_listed", "callback_offered"]);
   assert.deepEqual(result.topOpportunities.map((item) => item.title), ["Who owns follow-up"]);
   assert.deepEqual([result.fit.grade, result.fit.basis], ["B", "signals_unclear"]);
+  // The replaced question is nowhere in the stored result. Its ledger entries name the rule and the feature,
+  // never the question's text.
   assert.doesNotMatch(JSON.stringify(result), /through the website/);
+  assert.deepEqual(
+    result.diagnostics!.withheld.map((entry) => [entry.field, entry.category, entry.reason, entry.feature, entry.replacedByNeutral, entry.excerpt]),
+    [
+      ["category_questions", "website_forms", "question_unsupported_premise", FORM, undefined, undefined],
+      ["primary_question", undefined, "question_unsupported_premise", FORM, true, undefined],
+    ],
+  );
 });
 
 test("with accepted request evidence, Rafa's form question is kept exactly as asked", () => {
