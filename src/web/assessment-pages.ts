@@ -91,6 +91,18 @@ function hypothesisBlock(item: Hypothesis): string {
 <p><span class="tag">Hypothesis, not verified</span> ${escapeHtml(item.statement)}</p>`;
 }
 
+// The server composes every hypothesis sentence from accepted evidence, so a withheld primary can
+// only mean its evidence reference was not accepted. The first accepted top opportunity is shown in
+// its place, labelled as a fallback. It is one of the stored, already verified opportunities, so
+// nothing is added or rewritten, and nothing is saved.
+function primaryHypothesisSection(result: AssessmentResult): string {
+  if (result.primaryOpportunityHypothesis) return hypothesisBlock(result.primaryOpportunityHypothesis);
+  const fallback = result.topOpportunities[0];
+  if (fallback)
+    return `<p class="hint"><span class="tag">Fallback</span> The drafted primary hypothesis did not rest on an observation or signal Relay accepted, so it was not used. This is the first accepted opportunity (<strong>${escapeHtml(fallback.title)}</strong>), also listed below.</p>${hypothesisBlock(fallback)}`;
+  return '<p class="hint">The drafted primary hypothesis was withheld because it did not rest on an observation or signal Relay accepted.</p>';
+}
+
 function renderResult(result: AssessmentResult): string {
   const fit = result.fit;
   return `<h3>Preliminary prospect fit</h3>
@@ -115,11 +127,7 @@ ${
     : '<p class="hint">No observation could be verified from the retrieved excerpts, so there is no summary.</p>'
 }
 <h3>Primary opportunity hypothesis</h3>
-${
-  result.primaryOpportunityHypothesis
-    ? hypothesisBlock(result.primaryOpportunityHypothesis)
-    : '<p class="hint">The drafted hypothesis was withheld because it was not grounded in a verified observation or was worded as a conclusion.</p>'
-}
+${primaryHypothesisSection(result)}
 <h3>Primary discovery question</h3>
 ${
   result.primaryDiscoveryQuestion
@@ -239,7 +247,7 @@ export function renderAssessmentSection(
   const shown = view.records.find((record) => record.status === "completed");
   const result = shown && isResult(shown.result) ? shown.result : null;
   const outdated = shown?.outdated
-    ? '<div class="notice warning" role="status"><p>The research or the fit rubric has changed since this assessment was generated. It is kept as history; generate a new one to analyze the current basis.</p></div>'
+    ? '<div class="notice warning" role="status"><p>The research, the fit rubric, or the assessment pipeline has changed since this assessment was generated. It is kept as history; generate a new one to analyze the current basis.</p></div>'
     : "";
   const held =
     view.records[0]?.status === "needs_review" || view.records[0]?.status === "failed"

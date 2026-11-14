@@ -413,6 +413,11 @@ export type KeywordResearchChunk = {
 // even when the chunk's embedding is dominated by other page content. The query is
 // websearch syntax written by Relay code, never user or website text. Reads stored
 // chunks only: no provider call, no schema change, scoped to one prospect.
+//
+// Ordering: a chunk that matches one of the query's quoted phrases ("service request") ranks ahead
+// of a chunk that matches only its single words ("estimate"), because a phrase is the more specific
+// signal; ts_rank_cd then orders within each group, and page and chunk order break ties. A query with
+// no quoted phrase, or a result with no phrase match, is ordered by ts_rank_cd alone.
 export async function searchResearchChunksByKeyword(
   input: { prospectId: string; query: string; limit: number },
   database: Database,
@@ -420,6 +425,7 @@ export async function searchResearchChunksByKeyword(
   const prospectId = prospectUuid(input.prospectId);
   if (!input.query.trim() || input.query.length > 500)
     throw new Error("Keyword query must be 1 to 500 characters.");
+  const phrases = [...input.query.matchAll(/"[^"]+"/g)].map((match) => match[0]).join(" or ");
   if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)
     throw new Error("Search limit must be between 1 and 20.");
   const result = await database.query<{
@@ -433,12 +439,13 @@ export async function searchResearchChunksByKeyword(
     `SELECT c.id, c.research_document_id, c.source_url, c.chunk_index, c.content,
       ts_rank_cd(to_tsvector('english', c.content), q.query) AS rank
     FROM research_chunks c,
-      websearch_to_tsquery('english', $2) AS q(query)
+      websearch_to_tsquery('english', $2) AS q(query),
+      websearch_to_tsquery('english', $5) AS p(query)
     WHERE c.prospect_id = $1 AND c.embedding IS NOT NULL AND c.embedding_model = $3
       AND to_tsvector('english', c.content) @@ q.query
-    ORDER BY rank DESC, c.source_url, c.chunk_index
+    ORDER BY (to_tsvector('english', c.content) @@ p.query) DESC, rank DESC, c.source_url, c.chunk_index
     LIMIT $4`,
-    [prospectId, input.query, RESEARCH_EMBEDDING_MODEL, input.limit],
+    [prospectId, input.query, RESEARCH_EMBEDDING_MODEL, input.limit, phrases || input.query],
   );
   return result.rows.map((row) => ({
     id: row.id,

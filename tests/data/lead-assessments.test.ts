@@ -349,6 +349,40 @@ test("Lead intake assessments: durable, deduplicated, versioned, and fail-closed
     assert.notEqual(current!.fingerprint, expected(`${FIT_RUBRIC_VERSION}-next`));
   });
 
+  await t.test("a pipeline version increment outdates earlier assessments, keeps them, and allows exactly one new reserved run", async () => {
+    const { prospectId } = await prospect();
+    const first = await generate(prospectId, assessor().assess);
+    const stored = async () =>
+      (await database.query("SELECT status, result, withheld_count, evidence_fingerprint, updated_at FROM lead_intake_assessments WHERE id = $1", [first.assessmentId])).rows[0];
+    const before = await stored();
+
+    // Under the shipped (baseline) pipeline version the assessment is current, and the same research reuses it.
+    const shipped = await listAssessments(prospectId, database);
+    assert.equal(shipped.records[0]!.outdated, false);
+    assert.equal(shipped.records[0]!.evidenceFingerprint, shipped.current!.fingerprint);
+
+    // Under a raised version the same research has a different fingerprint, so the assessment is outdated but intact.
+    const raised = await listAssessments(prospectId, database, 2);
+    assert.notEqual(raised.current!.fingerprint, shipped.current!.fingerprint);
+    assert.equal(raised.records[0]!.outdated, true);
+    assert.equal(raised.records[0]!.status, "completed");
+
+    // Exactly one new run can be reserved under the new version, before any provider call.
+    const reservation = await reserveAssessment(prospectId, { database, model: MODEL, pipelineVersion: 2 });
+    assert.equal(reservation.kind, "reserved");
+    assert.notEqual((reservation as { id: string }).id, first.assessmentId);
+    await assert.rejects(
+      reserveAssessment(prospectId, { database, model: MODEL, pipelineVersion: 2 }),
+      (error) => error instanceof AssessmentUnavailableError && error.code === "in_progress",
+    );
+
+    // The earlier assessment is not modified, and the shipped version still reuses it instead of reserving.
+    assert.deepEqual(await stored(), before);
+    assert.deepEqual(await reserveAssessment(prospectId, { database, model: MODEL }), { kind: "existing", id: first.assessmentId });
+    // An invalid version is refused rather than treated as the baseline.
+    await assert.rejects(reserveAssessment(prospectId, { database, model: MODEL, pipelineVersion: 0 }), /integer of at least 1/);
+  });
+
   await t.test("a rubric version change outdates earlier assessments and allows a new run", async () => {
     const { prospectId } = await prospect();
     const first = await generate(prospectId, assessor().assess);

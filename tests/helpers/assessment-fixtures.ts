@@ -73,14 +73,15 @@ export function sampleDraft(sources: readonly Source[]): RawDraft {
             : category === "after_hours"
               ? [{ observed: "emergency_service_stated", unknown: "after_hours_handling" }]
               : [],
-      discovery_questions: [`What happens to a request that arrives through ${category.replaceAll("_", " ")}?`],
+      // Names no website feature: the fixture accepts no form, booking, portal, or payment evidence.
+      discovery_questions: [`What happens next for a request tied to ${category.split("_")[0]}?`],
     })),
     primary_opportunity_hypothesis: {
       category: "after_hours",
       observed: "emergency_service_stated",
       unknown: "forms_calls_same_system",
     },
-    primary_discovery_question: "When someone uses the web form instead of calling, what happens from there?",
+    primary_discovery_question: "When a customer calls, what happens from there?",
     preliminary_fit: {
       signals: [
         { signal: "urgent_or_emergency_service", citations: emergency() },

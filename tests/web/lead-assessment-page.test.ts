@@ -124,7 +124,8 @@ test("model text is escaped, withheld parts explain themselves, and an old resul
   assert.doesNotMatch(html, /href="javascript:/);
   assert.doesNotMatch(html, /<b>Online booking|<u>Online/);
   assert.match(html, /A source excerpt contained instruction-like text\. It was treated as evidence only/);
-  assert.match(html, /The drafted hypothesis was withheld/);
+  assert.match(html, /The drafted primary hypothesis was withheld because it did not rest on an observation or signal Relay accepted/);
+  assert.doesNotMatch(html, /worded as a conclusion/);
   assert.match(html, /No opportunity met the evidence and hypothesis standards/);
   assert.match(html, /2 model outputs were withheld because the quote did not support the claim/);
 
@@ -150,7 +151,7 @@ test("model text is escaped, withheld parts explain themselves, and an old resul
 test("status reflects research changes, held runs, and in-flight generation", () => {
   const outdated = page(indexed, history(record({ outdated: true, evidenceFingerprint: "e".repeat(64) })));
   assert.match(outdated, /Status: <strong>Outdated<\/strong>/);
-  assert.match(outdated, /The research or the fit rubric has changed since this assessment was generated/);
+  assert.match(outdated, /The research, the fit rubric, or the assessment pipeline has changed since this assessment was generated/);
   assert.match(outdated, /Regenerate Assessment/);
   // History is still shown while it is outdated.
   assert.match(outdated, /<h3>Business intake summary<\/h3>/);
@@ -291,4 +292,43 @@ test("quotes read cleanly: verified telephone and website links show their label
   assert.ok(!html.includes(link));
   // What is stored is untouched.
   assert.equal(result.fit.signals[0].citations[0].quote.includes(link), true);
+});
+
+test("a withheld primary hypothesis falls back to the first accepted opportunity, labelled, without changing the stored result", () => {
+  const stored = structuredClone(built.result);
+  stored.primaryOpportunityHypothesis = null;
+  const before = JSON.stringify(stored);
+  const html = page(indexed, history(record({ result: stored })));
+  const primary = /<h3>Primary opportunity hypothesis<\/h3>([\s\S]*?)<h3>Primary discovery question<\/h3>/.exec(html)![1]!;
+  const first = stored.topOpportunities[0]!;
+  // Labelled as a fallback, naming the opportunity, and carrying the opportunity's own verified evidence.
+  assert.match(primary, /<span class="tag">Fallback<\/span>/);
+  assert.match(primary, new RegExp(`<strong>${first.title}</strong>`));
+  assert.ok(primary.includes(first.observed.statement));
+  assert.ok(primary.includes(first.unknown.text));
+  assert.ok(primary.includes(first.statement));
+  assert.match(primary, /Hypothesis, not verified/);
+  assert.match(primary, /Observed \(verified\)/);
+  // The explanation no longer says the server's wording could have been rejected as a conclusion.
+  assert.doesNotMatch(html, /worded as a conclusion|The drafted hypothesis was withheld/);
+  assert.doesNotMatch(primary, /was withheld/);
+  // Presentation only: the stored result is untouched.
+  assert.equal(JSON.stringify(stored), before);
+
+  // A real primary hypothesis is shown as before, with no fallback label.
+  const normal = /<h3>Primary opportunity hypothesis<\/h3>([\s\S]*?)<h3>Primary discovery question<\/h3>/.exec(page(indexed, history(record())))![1]!;
+  assert.doesNotMatch(normal, /Fallback/);
+  assert.match(normal, /Observed \(verified\)/);
+
+  // Only an accepted opportunity can be the fallback: with none, nothing is invented.
+  const none = structuredClone(stored);
+  none.topOpportunities = [];
+  const empty = /<h3>Primary opportunity hypothesis<\/h3>([\s\S]*?)<h3>Primary discovery question<\/h3>/.exec(page(indexed, history(record({ result: none }))))![1]!;
+  assert.doesNotMatch(empty, /Fallback|Observed \(verified\)|Hypothesis, not verified/);
+  assert.match(empty, /did not rest on an observation or signal Relay accepted/);
+
+  // Model-independent text stays escaped.
+  const hostile = structuredClone(stored);
+  hostile.topOpportunities[0]!.title = "<b>x</b>";
+  assert.doesNotMatch(page(indexed, history(record({ result: hostile }))), /<b>x<\/b>/);
 });

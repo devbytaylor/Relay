@@ -1,12 +1,18 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import type { Pool } from "pg";
 import {
   ASSESSMENT_CATEGORIES,
   ASSESSMENT_RETRIEVAL_LIMITS,
+  distinctCandidates,
   mergeAssessmentEvidence,
+  retrieveAssessmentSources,
   type AssessmentRetrievalLimits,
   type EvidenceCandidate,
 } from "../../src/research/lead-intake-assessment.js";
+import { searchResearchChunksByKeyword } from "../../src/data/research-embeddings.js";
+import { fakeEmbedder } from "../helpers/assessment-fixtures.js";
+import { RAFA_FAQ_REQUEST_CHUNK, RAFA_FAQ_REQUEST_CHUNK_ID, RAFA_FORMS_KEYWORD_RANKING } from "../helpers/rafa-request-fixture.js";
 
 const chunk = (id: string, url: string, content: string): EvidenceCandidate => ({
   id,
@@ -147,4 +153,141 @@ test("a chunk found by both searches uses one slot in its category, not two", ()
   assert.equal(merged[0]!.via, "both");
   // via reflects the searches that found the chunk for the categories that picked it.
   assert.deepEqual(merged.slice(1).map((item) => item.via), ["vector", "vector", "vector", "vector"]);
+});
+
+// Rafa's Auto Repair: the forms-category keyword search ranked the FAQ sentence "Send a service request through
+// this site or call the shop directly" 7th, behind five chunks of which four are the same call to action
+// repeated on four pages. The candidate window is 6 (2 keyword slots x 3).
+const FORMS_WINDOW = 6;
+const FAQ_ID = RAFA_FAQ_REQUEST_CHUNK_ID;
+const rankedIds = RAFA_FORMS_KEYWORD_RANKING.map((row) => row.id);
+
+test("repeated site-wide copy no longer crowds a distinct relevant passage out of the candidate window", () => {
+  // The fixture is the real ranking: the FAQ chunk is 7th, and four of the first five are identical text.
+  assert.equal(rankedIds.indexOf(FAQ_ID), 6);
+  const first = RAFA_FORMS_KEYWORD_RANKING.slice(1, 5);
+  assert.equal(new Set(first.map((row) => row.content)).size, 1);
+  assert.deepEqual(first.map((row) => new URL(row.sourceUrl).pathname), ["/about", "/honda-acura-repair-santa-fe", "/subaru-repair-santa-fe", "/toyota-repair-santa-fe"]);
+
+  // Before: the first six rows, so the FAQ passage never became a candidate.
+  assert.ok(!rankedIds.slice(0, FORMS_WINDOW).includes(FAQ_ID));
+
+  // After: the same ranking with exact repeats removed, cut to the same window. Eight rows hold five distinct
+  // passages, and the FAQ chunk is now the fourth candidate.
+  const window = distinctCandidates(RAFA_FORMS_KEYWORD_RANKING, FORMS_WINDOW);
+  assert.deepEqual(window.map((row) => row.id), [rankedIds[0], rankedIds[1], rankedIds[5], FAQ_ID, rankedIds[7]]);
+  assert.equal(new Set(window.map((row) => row.content)).size, window.length);
+  // Deterministic: the same input gives the same window, and the first occurrence of the repeated text
+  // (best rank, then page order: /about) stays with its own page and chunk identity.
+  assert.deepEqual(distinctCandidates(RAFA_FORMS_KEYWORD_RANKING, FORMS_WINDOW), window);
+  assert.equal(window[1]!.sourceUrl, "https://rafasautorepair.com/about");
+});
+
+test("the deduplicated window lets the merge reach the FAQ chunk, which the old window could not", () => {
+  const limits = { ...ASSESSMENT_RETRIEVAL_LIMITS, keywordPerCategory: 5, maxKeywordPerPage: 5 };
+  const pick = (keyword: EvidenceCandidate[]) =>
+    mergeAssessmentEvidence([{ vector: [], keyword, keywordSlots: 5 }], limits).map((item) => item.candidate.id);
+  assert.ok(!pick(RAFA_FORMS_KEYWORD_RANKING.slice(0, FORMS_WINDOW)).includes(FAQ_ID));
+  assert.ok(pick(distinctCandidates(RAFA_FORMS_KEYWORD_RANKING, FORMS_WINDOW)).includes(FAQ_ID));
+});
+
+test("distinctCandidates drops only exact repeats and never exceeds its limit", () => {
+  const row = (id: string, content: string): EvidenceCandidate => ({ id, sourceUrl: `https://example.com/${id}`, content });
+  const rows = [
+    row("a", "Request Service"),
+    row("b", "  request   SERVICE\n"),
+    row("c", "Request Service today"),
+    row("d", "\u00a0 "),
+    row("e", "Call us"),
+    row("f", "Call us"),
+    row("g", "Another passage"),
+  ];
+  // Whitespace and case differences are repeats; a longer text containing the same words is not.
+  assert.deepEqual(distinctCandidates(rows, 10).map((item) => item.id), ["a", "c", "e", "g"]);
+  assert.deepEqual(distinctCandidates(rows, 2).map((item) => item.id), ["a", "c"]);
+  assert.deepEqual(distinctCandidates([], 5), []);
+  assert.deepEqual(distinctCandidates(rows, 0), []);
+});
+
+// A database that answers the two retrieval queries from fixed rows, honouring SQL LIMIT, and records them.
+function fakeDatabase() {
+  const keywordQueries: { query: string; limit: number }[] = [];
+  const vectorLimits: number[] = [];
+  const toRow = (row: (typeof RAFA_FORMS_KEYWORD_RANKING)[number], index: number) => ({
+    id: row.id,
+    research_document_id: `doc-${new URL(row.sourceUrl).pathname}`,
+    source_url: row.sourceUrl,
+    chunk_index: index,
+    content: row.content,
+    rank: 1 - index / 100,
+    distance: index / 100,
+  });
+  const database = {
+    query: async (sql: string, params: unknown[]) => {
+      if (sql.includes("websearch_to_tsquery")) {
+        const [, query, , limit] = params as [string, string, string, number];
+        keywordQueries.push({ query, limit });
+        // Only the forms query matches anything in this fixture.
+        return { rows: query.startsWith("form or quote") ? RAFA_FORMS_KEYWORD_RANKING.map(toRow).slice(0, limit) : [] };
+      }
+      vectorLimits.push((params as unknown[])[3] as number);
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  return { database, keywordQueries, vectorLimits };
+}
+const PROSPECT = "aafb94ca-80bc-4e5f-9932-eeb8e61188f0";
+
+test("retrieval reads the full candidate window, dedupes it, and keeps the evidence budget", async () => {
+  const { database, keywordQueries, vectorLimits } = fakeDatabase();
+  const embedder = fakeEmbedder();
+  const sources = await retrieveAssessmentSources(PROSPECT, { database, embed: embedder.embed });
+
+  // One embedding request for all categories, as before: no additional paid calls.
+  assert.equal(embedder.calls.length, 1);
+  assert.equal(embedder.calls[0]!.length, ASSESSMENT_CATEGORIES.length);
+  // One keyword and one vector search per category, each reading at most the search maximum (20) rows.
+  assert.equal(keywordQueries.length, ASSESSMENT_CATEGORIES.length);
+  assert.equal(vectorLimits.length, ASSESSMENT_CATEGORIES.length);
+  assert.ok(keywordQueries.every((item) => item.limit === 20));
+  assert.ok(vectorLimits.every((limit) => limit === 20));
+
+  // The repeated call to action reaches the model once, with its first page and chunk identity.
+  const cta = RAFA_FORMS_KEYWORD_RANKING[1]!;
+  const sameText = sources.filter((item) => item.text === cta.content);
+  assert.equal(sameText.length, 1);
+  assert.equal(sameText[0]!.chunkId, cta.id);
+  assert.equal(sameText[0]!.sourceUrl, cta.sourceUrl);
+  assert.equal(new Set(sources.map((item) => item.text)).size, sources.length);
+  // Context limits are unchanged and still hard limits.
+  assert.ok(sources.length <= ASSESSMENT_RETRIEVAL_LIMITS.maxChunks);
+  assert.ok(sources.reduce((total, item) => total + Buffer.byteLength(item.text), 0) <= ASSESSMENT_RETRIEVAL_LIMITS.maxBytes);
+  // Default keyword slots (2) are unchanged: the forms category still takes its two best distinct passages.
+  assert.deepEqual(sources.map((item) => item.chunkId), [rankedIds[0], rankedIds[1]]);
+});
+
+test("the keyword search ranks chunks matching an exact phrase ahead of chunks matching only single words", async () => {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  const database = { query: async (sql: string, params: unknown[]) => (calls.push({ sql, params }), { rows: [] }) } as unknown as Pool;
+  const forms = ASSESSMENT_CATEGORIES.find((item) => item.id === "website_forms")!;
+  await searchResearchChunksByKeyword({ prospectId: PROSPECT, query: forms.keywords, limit: 20 }, database);
+  const [call] = calls;
+  // Phrase matches sort first, then ts_rank_cd, then page and chunk order: all deterministic.
+  assert.match(call!.sql, /ORDER BY \(to_tsvector\('english', c\.content\) @@ p\.query\) DESC, rank DESC, c\.source_url, c\.chunk_index/);
+  // The priority query is exactly the category's quoted phrases, never the single words.
+  assert.equal(call!.params[1], forms.keywords);
+  assert.equal(call!.params[4], '"request service" or "service request"');
+  assert.equal(call!.params[3], 20);
+
+  // Every category's priority query is made only of its own quoted phrases, or is the whole query when it has none.
+  for (const category of ASSESSMENT_CATEGORIES) {
+    calls.length = 0;
+    await searchResearchChunksByKeyword({ prospectId: PROSPECT, query: category.keywords, limit: 3 }, database);
+    const quoted = category.keywords.match(/"[^"]+"/g);
+    assert.equal(calls[0]!.params[4], quoted ? quoted.join(" or ") : category.keywords, category.id);
+  }
+  // No phrases: the priority query is the query itself, so ordering reduces to ts_rank_cd alone.
+  calls.length = 0;
+  await searchResearchChunksByKeyword({ prospectId: PROSPECT, query: "emergency or weekend", limit: 3 }, database);
+  assert.equal(calls[0]!.params[4], "emergency or weekend");
 });

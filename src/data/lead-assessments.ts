@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
+import {
+  ASSESSMENT_PIPELINE_VERSION,
+  BASELINE_ASSESSMENT_PIPELINE_VERSION,
+  requirePipelineVersion,
+} from "../research/assessment-pipeline.js";
 import { FIT_RUBRIC_VERSION } from "../research/fit-rubric.js";
 import { RESEARCH_EMBEDDING_MODEL } from "../research/openai-embeddings.js";
 
@@ -39,7 +44,8 @@ export class AssessmentUnavailableError extends Error {
 export type EvidenceVersion = {
   researchRequestId: string;
   // SHA-256 of the fit rubric version, the research request, its documents, and
-  // its embedded chunks. A rubric change therefore outdates earlier assessments.
+  // its embedded chunks, plus the assessment pipeline version once it is raised
+  // above the baseline. A rubric or pipeline change therefore outdates earlier assessments.
   fingerprint: string;
   indexStatus: string | null;
   chunks: number;
@@ -49,11 +55,48 @@ export type EvidenceVersion = {
 const sha256 = (value: string) =>
   createHash("sha256").update(value, "utf8").digest("hex");
 
-// The research/index and rubric version an assessment analyzes. Read-only: it
-// changes whenever a document, a chunk, an embedding model, or the fit rubric changes.
+type FingerprintInput = {
+  rubricVersion: string;
+  pipelineVersion: number;
+  researchRequestId: string;
+  documents: readonly { source_url: string; content: string }[];
+  chunks: readonly {
+    source_url: string;
+    chunk_index: number;
+    content: string;
+    embedding_model: string | null;
+  }[];
+};
+
+// Pure. The rubric version and the pipeline version are separate inputs: a rubric change and a
+// pipeline change each outdate earlier assessments, and neither is recorded as the other. The baseline
+// pipeline version adds nothing to the hashed value, so every fingerprint computed before the pipeline
+// version existed is unchanged; a higher version is appended, so it always yields a different one.
+export function evidenceFingerprint(input: FingerprintInput): string {
+  const pipelineVersion = requirePipelineVersion(input.pipelineVersion);
+  const parts: unknown[] = [
+    input.rubricVersion,
+    input.researchRequestId,
+    input.documents.map((row) => [row.source_url, sha256(row.content)]),
+    input.chunks.map((row) => [
+      row.source_url,
+      row.chunk_index,
+      sha256(row.content),
+      row.embedding_model,
+    ]),
+  ];
+  if (pipelineVersion > BASELINE_ASSESSMENT_PIPELINE_VERSION) parts.push(pipelineVersion);
+  return sha256(JSON.stringify(parts));
+}
+
+// The research/index, rubric, and pipeline version an assessment analyzes. Read-only: it
+// changes whenever a document, a chunk, an embedding model, the fit rubric, or the pipeline version
+// changes. pipelineVersion defaults to the shipped version; a caller passes another only to ask what the
+// fingerprint would be under it.
 export async function currentEvidenceVersion(
   prospectId: string,
   database: Database,
+  pipelineVersion: number = ASSESSMENT_PIPELINE_VERSION,
 ): Promise<EvidenceVersion | null> {
   const request = (
     await database.query<{ id: string; website_index_status: string | null }>(
@@ -86,19 +129,13 @@ export async function currentEvidenceVersion(
   ).rows;
   return {
     researchRequestId: request.id,
-    fingerprint: sha256(
-      JSON.stringify([
-        FIT_RUBRIC_VERSION,
-        request.id,
-        documents.map((row) => [row.source_url, sha256(row.content)]),
-        chunks.map((row) => [
-          row.source_url,
-          row.chunk_index,
-          sha256(row.content),
-          row.embedding_model,
-        ]),
-      ]),
-    ),
+    fingerprint: evidenceFingerprint({
+      rubricVersion: FIT_RUBRIC_VERSION,
+      pipelineVersion,
+      researchRequestId: request.id,
+      documents,
+      chunks,
+    }),
     indexStatus: request.website_index_status,
     chunks: chunks.length,
     embeddedChunks: chunks.filter(
@@ -146,7 +183,7 @@ export type AssessmentReservation =
 // concurrent starts, and the partial unique index backs it up.
 export async function reserveAssessment(
   prospectId: string,
-  deps: { database: Pool; model: string },
+  deps: { database: Pool; model: string; pipelineVersion?: number },
 ): Promise<AssessmentReservation> {
   try {
     // Refusals are returned, not thrown, so the stale-run hold below commits.
@@ -168,7 +205,7 @@ export async function reserveAssessment(
         [prospectId, STALE_ASSESSMENT_MINUTES],
       );
 
-      const version = await currentEvidenceVersion(prospectId, client);
+      const version = await currentEvidenceVersion(prospectId, client, deps.pipelineVersion);
       if (
         !version ||
         (version.indexStatus !== null && version.indexStatus !== "ready") ||
@@ -275,8 +312,9 @@ export type AssessmentHistory = {
 export async function listAssessments(
   prospectId: string,
   database: Database,
+  pipelineVersion: number = ASSESSMENT_PIPELINE_VERSION,
 ): Promise<AssessmentHistory> {
-  const current = await currentEvidenceVersion(prospectId, database);
+  const current = await currentEvidenceVersion(prospectId, database, pipelineVersion);
   const rows = (
     await database.query<{
       id: string;

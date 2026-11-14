@@ -14,6 +14,8 @@ import {
 // taken from the model. Changing a threshold, signal, or lint is a rubric
 // change: bump FIT_RUBRIC_VERSION. The version is part of an assessment's
 // fingerprint, so a bump makes earlier assessments outdated and regenerable.
+// Changes to retrieval, evidence recognition, or question grounding are not rubric
+// changes; they are versioned separately by ASSESSMENT_PIPELINE_VERSION.
 //
 // Deliberate differences from the n8n agent:
 //  - The model reports quoted signals and the server derives A/B/C; the n8n

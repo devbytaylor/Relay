@@ -31,6 +31,7 @@ import {
   type FitSignalId,
 } from "./fit-rubric.js";
 import {
+  CHANNEL_NEUTRAL_PRIMARY_QUESTION,
   composeHypothesis,
   enclosingText,
   findPhoneNumber,
@@ -42,6 +43,7 @@ import {
   OBSERVATION_TYPE_IDS,
   phoneNumberContradicted,
   resolveTelLinks,
+  ungroundedQuestionFeature,
   unknownTopic,
   unknownText,
   UNKNOWN_IDS,
@@ -71,6 +73,9 @@ export type AssessmentRetrievalLimits = {
 // 8 of 22 slots in the first live run) without leaving a category short.
 const KEYWORD_CANDIDATES_PER_SLOT = 3;
 const VECTOR_CANDIDATE_FACTOR = 2;
+// Rows read per search before duplicates are removed: the most a search accepts. The window that
+// reaches the merge is unchanged; only exact repeats no longer occupy it.
+const CANDIDATE_READ_LIMIT = 20;
 
 // Each query is embedded once per assessment and searched within one prospect.
 // keywords is PostgreSQL websearch syntax over the same prospect's stored chunks.
@@ -219,6 +224,24 @@ export function mergeAssessmentEvidence<T extends EvidenceCandidate>(
     const flags = route.get(candidate.id)!;
     return { candidate, via: flags.vector && flags.keyword ? "both" : flags.keyword ? "keyword" : "vector" };
   });
+}
+
+// Pure: the first `limit` candidates whose text is not an exact (whitespace- and case-insensitive)
+// repeat of an earlier one, in the order the search ranked them. A call to action or widget repeated
+// on every page would otherwise fill the candidate window with one passage, so the distinct passages
+// ranked just below it never reach the merge. The first occurrence keeps its page and chunk identity.
+export function distinctCandidates<T extends EvidenceCandidate>(rows: readonly T[], limit: number): T[] {
+  const seen = new Set<string>();
+  const kept: T[] = [];
+  if (limit <= 0) return kept;
+  for (const row of rows) {
+    const key = evidenceKey(row.content);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(row);
+    if (kept.length >= limit) break;
+  }
+  return kept;
 }
 
 export class AssessmentOutputError extends Error {
@@ -485,6 +508,10 @@ export function buildAssessmentResult(
     if (!ok) withheld++;
     return ok;
   };
+  // The observation types the server accepted. A question naming a website feature (a form, online
+  // booking, a portal, online payment) is asked only when one of them shows that feature.
+  const acceptedTypes = (): ReadonlySet<string> =>
+    new Set([...observationsByCategory.values()].flatMap((items) => items.map((item) => item.type)));
   const unknownsOf = (ids: readonly UnknownId[]): Unknown[] =>
     [...new Set(ids)].map((id) => ({ id, text: unknownText(id) }));
 
@@ -587,6 +614,7 @@ export function buildAssessmentResult(
     };
   };
 
+  const types = acceptedTypes();
   const categories = ASSESSMENT_CATEGORIES.map((definition) => {
     const entry = draft.categories.find((item) => item.category === definition.id)!;
     const hypotheses: string[] = [];
@@ -600,13 +628,27 @@ export function buildAssessmentResult(
       observations: observationsByCategory.get(definition.id)!,
       unknowns: unknownsOf(entry.unknowns),
       hypotheses,
-      discoveryQuestions: entry.discoveryQuestions.filter(keepQuestion("category")),
+      discoveryQuestions: entry.discoveryQuestions
+        .filter(keepQuestion("category"))
+        .filter((question) => {
+          // Not asked: it presupposes a website feature the accepted evidence does not show.
+          const ungrounded = ungroundedQuestionFeature(question, types) !== null;
+          if (ungrounded) withheld++;
+          return !ungrounded;
+        }),
     };
   });
   const primary = grounded(draft.primary, draft.primary.category, false);
-  const primaryQuestion = keepQuestion("primary")(draft.primaryQuestion)
-    ? draft.primaryQuestion
-    : null;
+  // A primary question that presupposes an unverified website feature is replaced by a channel-neutral
+  // one the server wrote, which names no channel. A question that failed the style standard stays null.
+  let primaryQuestion: string | null = null;
+  if (keepQuestion("primary")(draft.primaryQuestion)) {
+    if (ungroundedQuestionFeature(draft.primaryQuestion, types) === null) primaryQuestion = draft.primaryQuestion;
+    else {
+      withheld++;
+      primaryQuestion = CHANNEL_NEUTRAL_PRIMARY_QUESTION;
+    }
+  }
   const topOpportunities = draft.top.flatMap((item) => {
     const kept = grounded(item, item.category, false);
     return kept ? [{ ...kept, title: unknownTopic(item.unknown) }] : [];
@@ -700,23 +742,21 @@ export async function retrieveAssessmentSources(
     throw new Error("Embedding provider returned an invalid response.");
   const perCategory: { vector: EvidenceCandidate[]; keyword: EvidenceCandidate[]; keywordSlots?: number }[] = [];
   for (const [position, category] of ASSESSMENT_CATEGORIES.entries()) {
-    const vector = await searchResearchChunks(
-      {
-        prospectId,
-        embedding: embeddings[position]!,
-        limit: Math.min(20, limits.perCategory * VECTOR_CANDIDATE_FACTOR),
-      },
-      deps.database,
+    const vector = distinctCandidates(
+      await searchResearchChunks(
+        { prospectId, embedding: embeddings[position]!, limit: CANDIDATE_READ_LIMIT },
+        deps.database,
+      ),
+      Math.min(CANDIDATE_READ_LIMIT, limits.perCategory * VECTOR_CANDIDATE_FACTOR),
     );
     const slots = limits.keywordPerCategory ? (category.keywordSlots ?? limits.keywordPerCategory) : 0;
     const keyword = slots
-      ? await searchResearchChunksByKeyword(
-          {
-            prospectId,
-            query: category.keywords,
-            limit: Math.min(20, slots * KEYWORD_CANDIDATES_PER_SLOT),
-          },
-          deps.database,
+      ? distinctCandidates(
+          await searchResearchChunksByKeyword(
+            { prospectId, query: category.keywords, limit: CANDIDATE_READ_LIMIT },
+            deps.database,
+          ),
+          Math.min(CANDIDATE_READ_LIMIT, slots * KEYWORD_CANDIDATES_PER_SLOT),
         )
       : [];
     perCategory.push({ vector, keyword, keywordSlots: slots });

@@ -47,6 +47,11 @@ test("the saved live model output is replayed with the phone number and the foll
     result.categories.find((item) => item.category === "follow_up")!.discoveryQuestions,
     ["After you contact someone about their request, who owns any further follow-up?"],
   );
+  // Sadowski's accepted request-form evidence keeps its form question grounded, so nothing is replaced or dropped.
+  assert.deepEqual(
+    result.categories.find((item) => item.category === "website_forms")!.discoveryQuestions,
+    ["When a customer submits the request form, what happens next, and how do you decide who handles it?"],
+  );
   // Only the unsupported "broad service territory" signal remains withheld.
   assert.equal(withheld, 1);
   assert.equal(result.withheld, 1);

@@ -158,8 +158,9 @@ export function enclosingText(source: string, quote: string): Occurrence[] | nul
       if (isLabelLine(lines[i]!)) scope = `${lines[i]!.trim()}\n${scope}`;
       break;
     }
-    // A label line sees its neighbouring label lines (an option list kept one option per line).
-    if (isLabelLine(sentence)) {
+    // A label line sees its neighbouring label lines (an option list kept one option per line). A quote
+    // that spans several lines already holds its own lines, and keeps the label line above it.
+    if (!sentence.includes("\n") && isLabelLine(sentence)) {
       let from = lineIndex;
       let to = lineIndex;
       while (from > 0 && lineIndex - from < 6 && isLabelLine(lines[from - 1]!)) from--;
@@ -247,6 +248,44 @@ const BUSINESS_HOURS =
 const RESPONSE_WINDOW =
   /\bwithin\s+(?:\d+|one|two|three|four|five|ten|twenty|thirty)\s*(?:minutes?|mins?|hours?|business days?|days?)\b/i;
 
+// A sentence the business wrote that invites a request through its own site: "Send a service request
+// through this site", "request service online", "online service requests". The channel must be named
+// (the site or online), because "send a service request" alone could be a phone call or a letter. A
+// bare "Request Service" label or link is a call to action, not an offer, and never matches.
+const SERVICE_REQUEST_OFFER =
+  /\b(?:send|submit|make|file|fill out|complete)\b[^.\n]{0,40}\b(?:service|repair|appointment|quote|estimate)\s+requests?\b[^.\n]{0,40}\b(?:through|via|on|using|from)\s+(?:this|our|the)\s+(?:web ?site|site|web ?page)\b|\brequest\s+(?:service|an appointment|a quote|an estimate)\s+(?:online|through\s+(?:this|our|the)\s+(?:web ?site|site))\b|\bonline\s+(?:service|repair|appointment|quote|estimate)\s+requests?\b/i;
+
+// Request-form fields: the labels a visitor fills in, and a standalone submit label. Each must be a
+// line of its own (an input label or a button), so prose that merely mentions "your name and phone",
+// a footer contact list, and a link such as "[Request Service](...)" are not forms. At least three
+// distinct fields and a submit label are needed; two fields (or no button) are only a contact blurb.
+const FORM_FIELD_LABELS: readonly RegExp[] = [
+  /^(?:your |full |first |last )?name$/i,
+  /^(?:your |best |phone |contact )?(?:phone|telephone|mobile)(?: number)?$/i,
+  /^e-?mail(?: address)?$/i,
+  /^(?:street |property |service )?address$/i,
+  /^(?:vehicle |model |manufacture )?year$/i,
+  /^make(?: (?:&|and) model)?$/i,
+  /^(?:your )?(?:vehicle|equipment|model)$/i,
+  /^mileage$/i,
+  /^(?:best|preferred) (?:day|time|date)(?: or (?:day|time|date))?$/i,
+  /^(?:message|comments?|details|notes?|anything else)$/i,
+];
+const FORM_SUBMIT_LABEL =
+  /^(?:request (?:service|a quote|an estimate|an appointment|a callback)|submit(?: (?:request|form))?|send(?: (?:message|request))?|get (?:a )?(?:free )?(?:quote|estimate))$/i;
+export function showsRequestFormFields(quote: string): boolean {
+  const lines = lintable(quote)
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/\s*\((?:optional|required)[^)]*\)\s*$/i, "").replace(/\s*[*]+$/, "").trim())
+    .filter(Boolean);
+  const fields = new Set<number>();
+  for (const line of lines) {
+    const index = FORM_FIELD_LABELS.findIndex((label) => label.test(line));
+    if (index >= 0) fields.add(index);
+  }
+  return fields.size >= 3 && lines.some((line) => FORM_SUBMIT_LABEL.test(line));
+}
+
 export type ObservationType = {
   id: string;
   category: AssessmentCategoryId;
@@ -303,6 +342,25 @@ export const OBSERVATION_TYPES: readonly ObservationType[] = [
     shows: (q) =>
       /\brequest (?:a |an )?(?:free )?(?:quote|estimate)\b|\bget (?:a |an |your )?(?:free )?(?:quote|estimate)\b|\bfree (?:quotes?|estimates?)\b/i.test(q),
     statement: () => "The website invites visitors to request a quote or estimate.",
+  },
+  {
+    id: "service_request_offered",
+    category: "website_forms",
+    label: "Service request through the website offered",
+    // The business must say it in a sentence; a button or link label is a call to action, not an offer.
+    requiresStatement: true,
+    shows: (q) => SERVICE_REQUEST_OFFER.test(q),
+    statement: () => "The website invites visitors to send a service request through the site.",
+  },
+  {
+    id: "request_form_fields_shown",
+    category: "website_forms",
+    label: "Request form fields shown",
+    // The evidence is interface text (field labels and a submit button), so list-like text is expected.
+    // Hedges ("coming soon") near the fields still make it Unconfirmed.
+    shows: showsRequestFormFields,
+    uiOption: true,
+    statement: () => "The website shows a request form with fields for the visitor's details and a submit button.",
   },
   {
     id: "form_urgency_selector_offered",
@@ -489,3 +547,50 @@ export const unknownText = (id: UnknownId): string => {
   const topic = UNKNOWN_TOPICS.find((item) => item.id === id)!;
   return `${topic.text} is not shown in the retrieved website excerpts.`;
 };
+
+// A discovery question that names a specific website feature presupposes that feature exists. The
+// model's wording is checked only for style, so each feature a question may mention is tied to the
+// accepted observation types that show it. A question that names a feature the server did not accept
+// evidence for is not asked. Questions about phone calls, callbacks, and hours name no website
+// feature and are not gated here. Only observations the server accepted count; Unconfirmed
+// evidence and signals never ground a premise.
+export const QUESTION_FEATURES: readonly {
+  feature: string;
+  mentions: RegExp;
+  shownBy: readonly string[];
+}[] = [
+  {
+    feature: "a website form or online request",
+    mentions:
+      /\bforms?\b|\bsubmit\w*|\bfill(?:s|ed|ing)? out\b|\b(?:web ?site|online|web) (?:service |repair |appointment )?(?:request|inquiry|enquiry|quote|submission|lead|message)s?\b|\b(?:request|inquiry|enquiry|quote|submission|lead|message|booking)s?\b[^?]{0,40}\b(?:through|via|from|on|using) (?:the |your |our |a )?(?:web ?site|site|web|online)\b|\b(?:through|via|using|by way of) (?:the |your |our |a )?(?:web ?site|site|online)\b/i,
+    shownBy: ["contact_form_offered", "service_request_offered", "request_form_fields_shown", "form_urgency_selector_offered"],
+  },
+  {
+    feature: "online booking",
+    mentions: /\bbook(?:s|ed|ing)?\b[^?]{0,30}\bonline\b|\bonline (?:booking|scheduling|appointments?|scheduler)\b|\bschedul\w*[^?]{0,30}\bonline\b|\bbooking (?:link|page|calendar|system|tool)\b/i,
+    shownBy: ["online_booking_offered"],
+  },
+  {
+    feature: "a customer portal",
+    mentions: /\bportal\b/i,
+    shownBy: ["customer_portal_offered"],
+  },
+  {
+    feature: "online payment",
+    mentions: /\bpay(?:s|ing|ment)?\b[^?]{0,20}\bonline\b|\bonline payments?\b/i,
+    shownBy: ["online_payment_offered"],
+  },
+];
+
+// The first website feature the question names that no accepted observation shows, or null.
+export function ungroundedQuestionFeature(question: string, acceptedTypes: ReadonlySet<string>): string | null {
+  const text = lintable(question);
+  for (const item of QUESTION_FEATURES)
+    if (item.mentions.test(text) && !item.shownBy.some((type) => acceptedTypes.has(type))) return item.feature;
+  return null;
+}
+
+// Used for the primary question when the model's question names a website feature with no accepted evidence.
+// It names no channel, so it makes no claim about the business.
+export const CHANNEL_NEUTRAL_PRIMARY_QUESTION =
+  "When a new customer reaches out, how does the request get to the person who follows up with them?";
