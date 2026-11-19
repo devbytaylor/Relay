@@ -1,6 +1,9 @@
 # Local development dashboard
 
-From the Relay repository root, run these commands in separate terminals:
+The commands below are a separately authorized, human-operated workflow. Agents
+must not run `dev:init` or apply migrations to the persistent `relay_dev`
+database. From the Relay repository root, a human operator runs these commands
+in separate terminals:
 
 ```sh
 npm run dev:init

@@ -43,7 +43,9 @@ research_documents (saved Firecrawl pages)
 
 ## Run the demo
 
-From the repository root:
+This persistent `relay_demo` initialization is a separately authorized,
+human-operated workflow. Agents must not run `up` or apply its migrations. From
+the repository root, a human operator runs:
 
 ```bash
 # 1. Create the demo database, apply all migrations (first run only), and seed

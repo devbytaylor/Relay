@@ -112,6 +112,7 @@ test("The Ask Relay UI process loads only Ask Relay, page, and pg modules: never
   assert.deepEqual(modules, [
     "scripts/run-ask-relay-ui.ts",
     "src/data/demo-database.ts",
+    "src/data/local-database-url.ts",
     "src/data/research-embeddings.ts",
     "src/research/ask-relay.ts",
     "src/research/openai-answerer.ts",
