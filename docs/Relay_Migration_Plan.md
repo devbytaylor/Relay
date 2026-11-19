@@ -517,7 +517,7 @@ request/reply history or generate a new ID to bypass these protections.
 Read-only recovery inspection:
 
 ```sql
-SELECT id, prospect_id, source_reply_message_id, status, review_status,
+SELECT id, prospect_id, source_reply_message_id, status,
        gmail_draft_id, gmail_message_id, gmail_thread_id, last_error
 FROM reply_processing_requests
 ORDER BY created_at DESC;
@@ -527,6 +527,31 @@ No automatic recovery/reset command is provided. No production migration, live
 provider evaluation, Gmail acceptance, scheduling, or managed response
 approval/send has been performed. Retain the disabled n8n exports until these
 remaining acceptance/feature boundaries are deliberately resolved.
+
+Migration 019 adds the response approval identity and one response send-attempt
+journal per draft. The draft owns review status; the fixed `needs_review` column
+is removed from the creation request. New response drafts retain the source
+reply's RFC Message-ID as their parent. Older drafts remain readable with a
+null parent until separately reconciled; review does not fetch Gmail to fill it.
+The migration defines future attempt states but blocks response approval,
+attempt insertion, and send transitions until Issues #53 and #55 deliberately
+enable their respective operations. The future attempt journal includes a
+durable invocation timestamp and append-only transition evidence. A confirmed
+or partial returned Gmail message ID cannot reuse one already held by another
+response attempt, an outbound draft, a follow-up attempt, or an outbound
+communication; the guard also checks later outbound writes. Draft and attempt
+send states must agree, and deletion or rewriting of attempt evidence is
+rejected by the database.
+The exact, read-only review command is:
+
+```bash
+npx tsx scripts/review-response.ts --prospect <UUID> --draft <UUID> --request <UUID> --reply <Gmail-message-ID>
+```
+
+It prints the full response body intentionally for operator review. Run it only
+in a private terminal, with the database target verified. It performs one
+Postgres SELECT and never loads Gmail credentials or changes approval/send state.
+Approval and sending remain separate future work.
 
 Verification on October 16, 2026: 219/219 full regression tests passed on
 disposable localhost Postgres. A final 51-test reply-processing/monitoring subset
