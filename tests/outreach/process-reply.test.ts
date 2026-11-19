@@ -7,6 +7,7 @@ import { Pool } from "pg";
 import { processLatestReply } from "../../src/outreach/process-reply.js";
 import { monitorReplies } from "../../src/outreach/reply-monitor.js";
 import { responseBodyWithSignature } from "../../src/outreach/reply-context.js";
+import { getResponseReview } from "../../src/outreach/response-review.js";
 import { replyDecision, rawReply } from "../helpers/reply-fixtures.js";
 
 test(
@@ -27,11 +28,9 @@ test(
       await admin.end();
     });
     const directory = new URL("../../migrations/", import.meta.url);
-    for (const file of (await readdir(directory))
+    const migrationFiles = (await readdir(directory))
       .filter((f) => f.endsWith(".sql"))
-      .sort()) {
-      await database.query(await readFile(new URL(file, directory), "utf8"));
-    }
+      .sort();
     const thread = (replyId = "reply") => ({
       id: "thread",
       messages: [
@@ -50,7 +49,11 @@ test(
       ],
     });
     const seed = async () => {
-      await database.query("DELETE FROM prospects");
+      // Reset this test-owned schema; audit rows cannot be deleted individually.
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.query(`CREATE SCHEMA ${schema}`);
+      for (const file of migrationFiles)
+        await database.query(await readFile(new URL(file, directory), "utf8"));
       const id = randomUUID();
       await database.query(
         `INSERT INTO prospects (id,company_name,contact_email,stage,cold_outreach_blocked)
@@ -148,6 +151,7 @@ test(
         );
         assert.equal(row.recipient_email, "person@example.com");
         assert.equal(row.gmail_thread_id, "thread");
+        assert.equal(row.response_parent_rfc_message_id, "<reply@example.com>");
         assert.equal(
           (await request(id)).classification.classification,
           "Interested",
@@ -164,6 +168,45 @@ test(
         );
       },
     );
+    await t.test("exact review reads draft, creation journal, reply and current attempt without writes", async () => {
+      const id = await seed();
+      const created = await processLatestReply(id, dependencies());
+      const identity = { prospectId: id, draftId: created.draftId!, requestId: created.requestId, replyId: "reply" };
+      const before = await database.query("SELECT updated_at FROM message_drafts WHERE id=$1", [created.draftId]);
+      const review = await getResponseReview(database, identity);
+      assert.equal(review.body, responseBodyWithSignature(replyDecision.suggestedResponse));
+      assert.equal(review.requestStatus, "created");
+      assert.equal(review.replyId, "reply");
+      assert.equal(review.replyParentRfcMessageId, "<reply@example.com>");
+      assert.equal(review.replyParentIdentityStatus, "recorded");
+      assert.equal(review.attemptStatus, null);
+      for (const change of [
+        { prospectId: randomUUID() }, { draftId: randomUUID() },
+        { requestId: randomUUID() }, { replyId: "other" },
+      ]) await assert.rejects(getResponseReview(database, { ...identity, ...change }));
+      assert.deepEqual((await database.query("SELECT updated_at FROM message_drafts WHERE id=$1", [created.draftId])).rows, before.rows);
+      assert.equal((await database.query("SELECT count(*) FROM response_send_attempts")).rows[0].count, "0");
+    });
+    await t.test("response approval and attempt claims remain disabled", async () => {
+      const id = await seed();
+      const created = await processLatestReply(id, dependencies());
+      const hash = "a".repeat(64);
+      assert.equal((await database.query("SELECT count(*) FROM reply_processing_requests WHERE prospect_id=$1", [id])).rows[0].count, "1");
+      await assert.rejects(database.query("UPDATE message_drafts SET review_status='approved' WHERE id=$1", [created.draftId]));
+      await assert.rejects(database.query("UPDATE message_drafts SET response_approval_hash=$2 WHERE id=$1", [created.draftId, hash]));
+      await assert.rejects(database.query("UPDATE message_drafts SET review_status='approved',response_approval_hash=$2,response_approved_snapshot=$3 WHERE id=$1", [created.draftId, hash, JSON.stringify({ recipientEmail: "person@example.com" })]));
+      await assert.rejects(database.query("INSERT INTO response_send_attempts (draft_id,status,approved_content_hash,approved_snapshot) VALUES ($1,'sent',$2,'{}')", [created.draftId, hash]));
+      await assert.rejects(database.query("INSERT INTO response_send_attempts (draft_id,status,approved_content_hash,approved_snapshot) VALUES ($1,'preflight',$2,$3)", [created.draftId, hash, JSON.stringify({ recipientEmail: "person@example.com" })]));
+      await assert.rejects(database.query("INSERT INTO response_send_attempts (draft_id,status,approved_content_hash,approved_snapshot) VALUES ($1,'preflight',$2,'{}')", [created.draftId, hash]));
+      assert.equal((await database.query("UPDATE response_send_attempts SET status='invoking' WHERE draft_id=$1", [created.draftId])).rowCount, 0);
+      assert.equal((await database.query("UPDATE response_send_attempts SET status='needs_reconciliation' WHERE draft_id=$1", [created.draftId])).rowCount, 0);
+      await assert.rejects(database.query("UPDATE message_drafts SET send_status='sending' WHERE id=$1", [created.draftId]));
+      assert.equal((await database.query("SELECT send_status FROM message_drafts WHERE id=$1", [created.draftId])).rows[0].send_status, "pending");
+      const review = await getResponseReview(database, { prospectId: id, draftId: created.draftId!, requestId: created.requestId, replyId: "reply" });
+      assert.equal(review.attemptStatus, null);
+      const outreach = (await database.query("SELECT id FROM message_drafts WHERE prospect_id=$1 AND draft_type='outreach'", [id])).rows[0].id;
+      await assert.rejects(database.query("INSERT INTO response_send_attempts (draft_id,status,approved_content_hash,approved_snapshot) VALUES ($1,'preflight',$2,'{}')", [outreach, hash]));
+    });
     await t.test(
       "concurrent and repeated processing cannot duplicate AI calls or Gmail drafts",
       async () => {
@@ -569,33 +612,16 @@ test(
       },
     );
     await t.test(
-      "monitor revokes stale approval but preserves in-flight response evidence",
+      "monitor revokes a pending response without creating an attempt",
       async () => {
-        for (const sendStatus of [
-          "pending",
-          "sending",
-          "needs_reconciliation",
-          "sent",
-        ]) {
-          const id = await seed();
-          const result = await processLatestReply(id, dependencies());
-          await database.query(
-            "UPDATE message_drafts SET review_status='approved',send_status=$2 WHERE id=$1",
-            [result.draftId, sendStatus],
-          );
-          await monitorReplies(database, async () => thread("newer"));
-          const draft = (
-            await database.query("SELECT * FROM message_drafts WHERE id=$1", [
-              result.draftId,
-            ])
-          ).rows[0];
-          assert.equal(
-            draft.review_status,
-            sendStatus === "pending" ? "rejected" : "approved",
-          );
-          assert.equal(draft.send_status, sendStatus);
-          assert.equal((await request(id)).status, "stale");
-        }
+        const id = await seed();
+        const result = await processLatestReply(id, dependencies());
+        await monitorReplies(database, async () => thread("newer"));
+        const draft = (await database.query("SELECT review_status,send_status FROM message_drafts WHERE id=$1", [result.draftId])).rows[0];
+        assert.equal(draft.review_status, "rejected");
+        assert.equal(draft.send_status, "pending");
+        assert.equal((await request(id)).status, "stale");
+        assert.equal((await database.query("SELECT count(*) FROM response_send_attempts WHERE draft_id=$1", [result.draftId])).rows[0].count, "0");
       },
     );
   },

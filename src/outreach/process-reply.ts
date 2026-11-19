@@ -220,8 +220,9 @@ export async function processLatestReply(
         throw new Error("Draft creation request requires reconciliation.");
       await client.query(
         `INSERT INTO message_drafts (id,prospect_id,draft_type,recipient_email,subject,body,
-        gmail_draft_id,gmail_thread_id,source_reply_message_id,review_status,send_status)
-        VALUES ($1,$2,'response',$3,$4,$5,$6,$7,$8,'needs_review','pending')`,
+        gmail_draft_id,gmail_thread_id,source_reply_message_id,response_parent_rfc_message_id,
+        review_status,send_status)
+        VALUES ($1,$2,'response',$3,$4,$5,$6,$7,$8,$9,'needs_review','pending')`,
         [
           requestId,
           target.id,
@@ -231,6 +232,7 @@ export async function processLatestReply(
           gmail!.draftId,
           gmail!.threadId,
           target.reply_id,
+          context.messageIdHeader,
         ],
       );
     });
