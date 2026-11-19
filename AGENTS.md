@@ -39,6 +39,13 @@ Treat every pre-existing uncommitted change, whether staged, unstaged, or untrac
 - If human-owned changes conflict with the task, stop and ask.
 - If a command unexpectedly changes the worktree, stop and report the exact change instead of cleaning it up.
 
+## Specification and worktree continuity
+
+- For requirements in a repository specification, verify before implementation that the specification is committed and its exact commit is reachable from the verified requirements baseline used for implementation. Stop if the specification or baseline cannot be verified. Record the specification path and exact commit SHA in both the implementation and independent review handoffs; record a requirements version only when one is explicitly defined.
+- An approved GitHub Issue body is valid authoritative scope when requirements are issue-only; a repository specification is not required for that scope. Record the issue URL or number and the approved acceptance-criteria snapshot or content digest in both handoffs. Stop if the issue requirements change without reapproval.
+- Before declaring work complete, run `git worktree list --porcelain` and inspect every reported worktree for staged, unstaged, untracked, or unfinished specification and implementation work. Report unresolved work and preserve human-owned changes.
+- Before declaring a change merge-ready, verify every required repository specification is committed and included in the pull request or already exists in `main`, and verify issue-only scope remains consistent with its approved acceptance criteria. Hold merge readiness if either check fails; never silently abandon worktree changes.
+
 ## Databases
 
 - **No production database operations.** Do not connect to, query, or write a production database without explicit authorization for that specific operation, and never apply migrations to one. Never use a production or other non-disposable database for tests or verification. `src/db.ts` loads `.env` through `dotenv`, so `DATABASE_URL` may point at a remote production database by default.
