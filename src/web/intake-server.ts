@@ -51,6 +51,11 @@ export type IntakeServerEvent =
   | { event: "research_requested"; prospectId: string }
   | { event: "research_finished"; prospectId: string; status: string }
   | { event: "research_stopped"; prospectId: string; error: string }
+  | {
+      event: "assessment_requested" | "assessment_finished";
+      prospectId: string;
+    }
+  | { event: "assessment_stopped"; prospectId: string; error: string }
   | { event: "request_failed"; error: string };
 
 export type IntakeResearchDependencies = {
@@ -59,17 +64,60 @@ export type IntakeResearchDependencies = {
   getRequest: (prospectId: string) => Promise<ResearchSummary | null>;
 };
 
+type DashboardProspectView = {
+  id: string;
+  companyName: string;
+  website: string | null;
+  industry: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  stage: string;
+  embeddedChunks: number;
+  websiteIndexStatus?: string | null;
+};
+
 export type IntakeServerDependencies = {
   createProspect: (input: ProspectIntakeInput) => Promise<ProspectIntakeResult>;
   // Without this the UI offers no research action and serves no research routes.
   research?: IntakeResearchDependencies;
+  dashboard?: {
+    listProspects: () => Promise<DashboardProspectView[]>;
+    // The assessment value is opaque here: this module must not import assessment code.
+    // A method signature, so a renderer that expects the concrete history type is assignable.
+    render(
+      prospects: readonly DashboardProspectView[],
+      selected: DashboardProspectView | undefined,
+      askId: string,
+      saved: "created" | "existing" | null,
+      inline?: { content: string; refresh: boolean } | null,
+      assessment?: unknown,
+    ): string;
+    csp: string;
+    askHandler: (getServer: () => Server) => ((
+      req: IncomingMessage,
+      res: ServerResponse,
+    ) => Promise<void>) & {
+      inlineAnswer: (
+        prospectId: string,
+        askId: string,
+      ) => { content: string; refresh: boolean } | null;
+    };
+    researchIndex?: (prospectId: string) => Promise<void>;
+    // Without these the dashboard shows no assessment and serves no assessment route.
+    loadAssessment?: (prospectId: string) => Promise<unknown>;
+    generateAssessment?: (prospectId: string) => Promise<unknown>;
+  };
   generateRequestId?: () => string;
   log?: (event: IntakeServerEvent) => void;
 };
 
 type Route = {
   method: "GET" | "POST";
-  handle: (req: IncomingMessage, res: ServerResponse, host: string) => Promise<void> | void;
+  handle: (
+    req: IncomingMessage,
+    res: ServerResponse,
+    host: string,
+  ) => Promise<void> | void;
 };
 type SubmittedForm = { values: IntakeFormValues; confirmed: boolean };
 
@@ -81,8 +129,18 @@ const PAGE_HEADERS: OutgoingHttpHeaders = {
   "x-frame-options": "DENY",
 };
 const PROSPECT_FORM_FIELDS = new Set<string>(INTAKE_FIELDS);
-const CONFIRMED_FORM_FIELDS = new Set<string>([...INTAKE_FIELDS, INTAKE_CONFIRM_FIELD]);
-const RESEARCH_FORM_FIELDS = new Set<string>([RESEARCH_PROSPECT_FIELD, INTAKE_CONFIRM_FIELD]);
+const CONFIRMED_FORM_FIELDS = new Set<string>([
+  ...INTAKE_FIELDS,
+  INTAKE_CONFIRM_FIELD,
+]);
+const RESEARCH_FORM_FIELDS = new Set<string>([
+  RESEARCH_PROSPECT_FIELD,
+  INTAKE_CONFIRM_FIELD,
+]);
+// Literals, not imports from assessment-pages: the intake-only process must not
+// load assessment code. A web test pins them to the exported constants.
+const ASSESSMENT_PATH = "/assessment";
+const ASSESSMENT_CONFIRM_VALUE = "generate-assessment";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function parseIntakeUiPort(value: string | undefined): number {
@@ -145,7 +203,10 @@ function isSameOriginPost(req: IncomingMessage, host: string): boolean {
 }
 
 function isFormSubmission(req: IncomingMessage): boolean {
-  const type = req.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+  const type = req.headers["content-type"]
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
   return type === "application/x-www-form-urlencoded";
 }
 
@@ -171,12 +232,17 @@ function readBody(req: IncomingMessage): Promise<Buffer | "too_large"> {
     });
     req.on("end", () => settle(() => resolve(Buffer.concat(chunks, size))));
     req.on("error", (error) => settle(() => reject(error)));
-    req.on("close", () => settle(() => reject(new Error("Request body was not completed."))));
+    req.on("close", () =>
+      settle(() => reject(new Error("Request body was not completed."))),
+    );
   });
 }
 
 // Strict form contract: unknown, duplicated, or non-UTF-8 fields are malformed.
-function parseForm(body: Buffer, allowed: ReadonlySet<string>): Map<string, string> | null {
+function parseForm(
+  body: Buffer,
+  allowed: ReadonlySet<string>,
+): Map<string, string> | null {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(body);
@@ -198,25 +264,42 @@ async function readFields(
   allowed: ReadonlySet<string>,
 ): Promise<Map<string, string> | null> {
   if (!isSameOriginPost(req, host)) {
-    sendError(res, 403, "Request rejected",
-      "Relay accepts this form only from its own pages at a loopback address. Nothing was created.");
+    sendError(
+      res,
+      403,
+      "Request rejected",
+      "Relay accepts this form only from its own pages at a loopback address. Nothing was created.",
+    );
     return null;
   }
   if (!isFormSubmission(req)) {
-    sendError(res, 415, "Unsupported submission",
-      "Relay accepts only standard HTML form submissions here. Nothing was created.");
+    sendError(
+      res,
+      415,
+      "Unsupported submission",
+      "Relay accepts only standard HTML form submissions here. Nothing was created.",
+    );
     return null;
   }
   const body = await readBody(req);
   if (body === "too_large") {
-    sendError(res, 413, "Submission too large",
-      "The form submission exceeded the size limit. Nothing was created.", { connection: "close" });
+    sendError(
+      res,
+      413,
+      "Submission too large",
+      "The form submission exceeded the size limit. Nothing was created.",
+      { connection: "close" },
+    );
     return null;
   }
   const fields = parseForm(body, allowed);
   if (!fields) {
-    sendError(res, 400, "Submission not accepted",
-      "Relay could not read this form submission. Nothing was created.");
+    sendError(
+      res,
+      400,
+      "Submission not accepted",
+      "Relay could not read this form submission. Nothing was created.",
+    );
     return null;
   }
   return fields;
@@ -235,16 +318,33 @@ async function readForm(
     const value = fields.get(name);
     if (value !== undefined) values[name] = value;
   }
-  return { values, confirmed: fields.get(INTAKE_CONFIRM_FIELD) === INTAKE_CONFIRM_VALUE };
+  return {
+    values,
+    confirmed: fields.get(INTAKE_CONFIRM_FIELD) === INTAKE_CONFIRM_VALUE,
+  };
 }
 
 // Prospect intake performs all validation; a rejection re-renders the form with the same request ID.
-function parseOrRenderInvalid(values: IntakeFormValues, res: ServerResponse): ProspectIntakeInput | null {
+function parseOrRenderInvalid(
+  values: IntakeFormValues,
+  res: ServerResponse,
+): ProspectIntakeInput | null {
   try {
     return parseProspectIntakePayload(values);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Prospect intake input is invalid.";
-    sendPage(res, 422, renderIntakeForm({ requestId: values.requestId ?? "", values, error: message }));
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Prospect intake input is invalid.";
+    sendPage(
+      res,
+      422,
+      renderIntakeForm({
+        requestId: values.requestId ?? "",
+        values,
+        error: message,
+      }),
+    );
     return null;
   }
 }
@@ -259,18 +359,29 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
     }
   };
 
-  async function createProspect(input: ProspectIntakeInput, res: ServerResponse): Promise<void> {
+  async function createProspect(
+    input: ProspectIntakeInput,
+    res: ServerResponse,
+  ): Promise<void> {
     let result: ProspectIntakeResult;
     try {
       result = await dependencies.createProspect(input);
     } catch (error) {
       if (error instanceof ProspectIntakeConflictError) {
         log({ event: "intake_conflict", requestId: input.requestId });
-        sendPage(res, 409, renderIntakeConflict(input.requestId, error.message));
+        sendPage(
+          res,
+          409,
+          renderIntakeConflict(input.requestId, error.message),
+        );
         return;
       }
       // Anything else may have committed: keep the request ID and direct an unchanged retry.
-      log({ event: "intake_outcome_unknown", requestId: input.requestId, error: errorKind(error) });
+      log({
+        event: "intake_outcome_unknown",
+        requestId: input.requestId,
+        error: errorKind(error),
+      });
       sendPage(res, 500, renderIntakeOutcomeUnknown(input.requestId));
       return;
     }
@@ -279,6 +390,15 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       requestId: result.requestId,
       prospectId: result.prospectId,
     });
+    if (dependencies.dashboard) {
+      res.writeHead(303, {
+        ...PAGE_HEADERS,
+        "content-length": 0,
+        location: `/prospect?id=${encodeURIComponent(result.prospectId)}&saved=${result.created ? "created" : "existing"}`,
+      });
+      res.end();
+      return;
+    }
     // Only a prospect still awaiting research is offered the action; the start recheck is durable.
     const offer: ResearchOffer = !dependencies.research
       ? "none"
@@ -287,10 +407,16 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
         : input.website === null
           ? "no-website"
           : "start";
-    sendPage(res, result.created ? 201 : 200, renderIntakeSuccess(result, input.requestId, offer));
+    sendPage(
+      res,
+      result.created ? 201 : 200,
+      renderIntakeSuccess(result, input.requestId, offer),
+    );
   }
 
-  function researchRoutes(research: IntakeResearchDependencies): [string, Route][] {
+  function researchRoutes(
+    research: IntakeResearchDependencies,
+  ): [string, Route][] {
     // Research this process is running, or whose last start here stopped. Postgres stays authoritative:
     // the workflow's row lock and unique request reject any duplicate this map cannot see.
     const runs = new Map<string, Exclude<LocalResearchRun, "idle">>();
@@ -303,16 +429,27 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
         .then(
           (request) => {
             runs.delete(prospectId);
-            log({ event: "research_finished", prospectId, status: request.status });
+            log({
+              event: "research_finished",
+              prospectId,
+              status: request.status,
+            });
           },
           (error: unknown) => {
             runs.set(prospectId, "stopped");
-            log({ event: "research_stopped", prospectId, error: errorKind(error) });
+            log({
+              event: "research_stopped",
+              prospectId,
+              error: errorKind(error),
+            });
           },
         );
     }
 
-    async function startResearch(prospectId: string, res: ServerResponse): Promise<void> {
+    async function startResearch(
+      prospectId: string,
+      res: ServerResponse,
+    ): Promise<void> {
       if (runs.get(prospectId) !== "running") {
         // Claim before the first await so a repeated submission cannot launch twice.
         runs.set(prospectId, "running");
@@ -322,8 +459,12 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
         } catch (error) {
           runs.delete(prospectId);
           log({ event: "request_failed", error: errorKind(error) });
-          sendError(res, 500, "Research not started",
-            "Relay could not check this prospect's research state, so research was not started.");
+          sendError(
+            res,
+            500,
+            "Research not started",
+            "Relay could not check this prospect's research state, so research was not started.",
+          );
           return;
         }
         if (existing) runs.delete(prospectId);
@@ -338,97 +479,398 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
     }
 
     return [
-      [RESEARCH_START_PATH, {
-        method: "POST",
-        handle: async (req, res, host) => {
-          const fields = await readFields(req, res, host, RESEARCH_FORM_FIELDS);
-          if (!fields) return;
-          if (fields.get(INTAKE_CONFIRM_FIELD) !== RESEARCH_CONFIRM_VALUE) {
-            sendError(res, 400, "Confirmation required",
-              "Research starts only from the Start Research button. Research was not started.");
-            return;
-          }
-          const prospectId = fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
-          if (!UUID.test(prospectId)) {
-            sendError(res, 400, "Research not started",
-              "This submission does not identify a prospect. Research was not started.");
-            return;
-          }
-          await startResearch(prospectId, res);
+      [
+        RESEARCH_START_PATH,
+        {
+          method: "POST",
+          handle: async (req, res, host) => {
+            const fields = await readFields(
+              req,
+              res,
+              host,
+              RESEARCH_FORM_FIELDS,
+            );
+            if (!fields) return;
+            if (fields.get(INTAKE_CONFIRM_FIELD) !== RESEARCH_CONFIRM_VALUE) {
+              sendError(
+                res,
+                400,
+                "Confirmation required",
+                "Research starts only from the Start Research button. Research was not started.",
+              );
+              return;
+            }
+            const prospectId =
+              fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+            if (!UUID.test(prospectId)) {
+              sendError(
+                res,
+                400,
+                "Research not started",
+                "This submission does not identify a prospect. Research was not started.",
+              );
+              return;
+            }
+            await startResearch(prospectId, res);
+          },
         },
-      }],
-      [RESEARCH_STATUS_PATH, {
-        method: "GET",
-        handle: async (req, res) => {
-          const query = new URLSearchParams((req.url ?? "").split("?", 2)[1] ?? "");
-          const prospectId = query.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
-          if (!UUID.test(prospectId)) {
-            sendError(res, 400, "Research status unavailable", "This link does not identify a prospect.");
-            return;
-          }
-          // Read the local run first: the durable read that follows can only be newer.
-          const local = runs.get(prospectId) ?? "idle";
-          const request = await research.getRequest(prospectId);
-          sendPage(res, 200, renderResearchStatus({ prospectId, request, local }));
+      ],
+      [
+        RESEARCH_STATUS_PATH,
+        {
+          method: "GET",
+          handle: async (req, res) => {
+            const query = new URLSearchParams(
+              (req.url ?? "").split("?", 2)[1] ?? "",
+            );
+            const prospectId =
+              query.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+            if (!UUID.test(prospectId)) {
+              sendError(
+                res,
+                400,
+                "Research status unavailable",
+                "This link does not identify a prospect.",
+              );
+              return;
+            }
+            // Read the local run first: the durable read that follows can only be newer.
+            const local = runs.get(prospectId) ?? "idle";
+            const request = await research.getRequest(prospectId);
+            sendPage(
+              res,
+              200,
+              renderResearchStatus({ prospectId, request, local }),
+            );
+          },
         },
-      }],
+      ],
     ];
   }
 
+  const askHandler = dependencies.dashboard
+    ? dependencies.dashboard.askHandler(() => server)
+    : undefined;
+  const assessmentRuns = new Set<string>();
+  const dashboardRoutes: [string, Route][] = dependencies.dashboard
+    ? [
+        [
+          "/research-index",
+          {
+            method: "POST",
+            handle: async (req, res, host) => {
+              if (!dependencies.dashboard?.researchIndex)
+                return sendError(
+                  res,
+                  404,
+                  "Unavailable",
+                  "Website indexing is unavailable.",
+                );
+              const fields = await readFields(
+                req,
+                res,
+                host,
+                RESEARCH_FORM_FIELDS,
+              );
+              if (!fields) return;
+              const id =
+                fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+              if (
+                fields.get(INTAKE_CONFIRM_FIELD) !== "research-index" ||
+                !UUID.test(id)
+              )
+                return sendError(
+                  res,
+                  400,
+                  "Confirmation required",
+                  "Website indexing requires an explicit confirmation.",
+                );
+              const prospect = (
+                await dependencies.dashboard.listProspects()
+              ).find((p) => p.id === id);
+              if (
+                !prospect ||
+                (prospect.embeddedChunks &&
+                  (!("websiteIndexStatus" in prospect) ||
+                    prospect.websiteIndexStatus === "ready"))
+              )
+                return sendError(
+                  res,
+                  409,
+                  "Research unavailable",
+                  "This prospect is already indexed or unavailable.",
+                );
+              // The durable reservation in researchIndex rejects duplicate starts.
+              void dependencies.dashboard
+                .researchIndex(id)
+                .catch((error: unknown) =>
+                  log({
+                    event: "research_stopped",
+                    prospectId: id,
+                    error: errorKind(error),
+                  }),
+                );
+              res.writeHead(303, {
+                ...PAGE_HEADERS,
+                "content-length": 0,
+                location: `/prospect?id=${encodeURIComponent(id)}`,
+              });
+              res.end();
+            },
+          },
+        ],
+        [
+          ASSESSMENT_PATH,
+          {
+            method: "POST",
+            handle: async (req, res, host) => {
+              const dashboard = dependencies.dashboard!;
+              if (!dashboard.generateAssessment)
+                return sendError(
+                  res,
+                  404,
+                  "Unavailable",
+                  "Assessment generation is unavailable.",
+                );
+              const fields = await readFields(
+                req,
+                res,
+                host,
+                RESEARCH_FORM_FIELDS,
+              );
+              if (!fields) return;
+              const id =
+                fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+              if (
+                fields.get(INTAKE_CONFIRM_FIELD) !== ASSESSMENT_CONFIRM_VALUE ||
+                !UUID.test(id)
+              )
+                return sendError(
+                  res,
+                  400,
+                  "Confirmation required",
+                  "An assessment is generated only from the Generate Assessment button. Nothing was generated.",
+                );
+              const prospect = (await dashboard.listProspects()).find(
+                (p) => p.id === id,
+              );
+              if (
+                !prospect ||
+                !prospect.embeddedChunks ||
+                (prospect.websiteIndexStatus &&
+                  prospect.websiteIndexStatus !== "ready")
+              )
+                return sendError(
+                  res,
+                  409,
+                  "Assessment unavailable",
+                  "This prospect has no indexed research to assess. Nothing was generated.",
+                );
+              // The durable reservation rejects a duplicate paid run; this only avoids a second launch from this process.
+              if (!assessmentRuns.has(id)) {
+                assessmentRuns.add(id);
+                log({ event: "assessment_requested", prospectId: id });
+                void Promise.resolve()
+                  .then(() => dashboard.generateAssessment!(id))
+                  .then(
+                    () => log({ event: "assessment_finished", prospectId: id }),
+                    (error: unknown) =>
+                      log({
+                        event: "assessment_stopped",
+                        prospectId: id,
+                        error: errorKind(error),
+                      }),
+                  )
+                  .finally(() => assessmentRuns.delete(id));
+              }
+              res.writeHead(303, {
+                ...PAGE_HEADERS,
+                "content-length": 0,
+                location: `/prospect?id=${encodeURIComponent(id)}`,
+              });
+              res.end();
+            },
+          },
+        ],
+        [
+          "/new",
+          {
+            method: "GET",
+            handle: (_req, res) =>
+              sendPage(
+                res,
+                200,
+                renderIntakeForm({ requestId: generateRequestId() }),
+              ),
+          },
+        ],
+        [
+          "/prospect",
+          {
+            method: "GET",
+            handle: async (req, res) => {
+              const query = new URLSearchParams(
+                (req.url ?? "").split("?", 2)[1] ?? "",
+              );
+              const id = query.get("id")?.toLowerCase() ?? "";
+              if (!UUID.test(id))
+                return sendError(
+                  res,
+                  400,
+                  "Prospect unavailable",
+                  "This link does not identify a prospect.",
+                );
+              const prospects = await dependencies.dashboard!.listProspects();
+              const selected = prospects.find((p) => p.id === id);
+              if (!selected)
+                return sendError(
+                  res,
+                  404,
+                  "Prospect unavailable",
+                  "This prospect was not found.",
+                );
+              const saved = query.get("saved");
+              const answerId = query.get("answer")?.toLowerCase();
+              const inline =
+                answerId === undefined
+                  ? null
+                  : askHandler?.inlineAnswer(id, answerId);
+              if (answerId !== undefined && !inline)
+                return sendError(
+                  res,
+                  404,
+                  "Answer unavailable",
+                  "This answer is not available for this prospect.",
+                );
+              const assessment = dependencies.dashboard!.loadAssessment
+                ? await dependencies.dashboard!.loadAssessment(id)
+                : null;
+              sendPage(
+                res,
+                200,
+                dependencies.dashboard!.render(
+                  prospects,
+                  selected,
+                  randomUUID(),
+                  saved === "created" || saved === "existing" ? saved : null,
+                  inline,
+                  assessment,
+                ),
+                { "content-security-policy": dependencies.dashboard!.csp },
+              );
+            },
+          },
+        ],
+      ]
+    : [];
   const routes = new Map<string, Route>([
-    ["/", {
-      method: "GET",
-      handle: (_req, res) => sendPage(res, 200, renderIntakeForm({ requestId: generateRequestId() })),
-    }],
-    ["/healthz", {
-      method: "GET",
-      handle: (_req, res) => {
-        res.writeHead(200, {
-          "cache-control": "no-store",
-          "content-type": "text/plain; charset=utf-8",
-          "x-content-type-options": "nosniff",
-        });
-        res.end("ok\n");
+    [
+      "/",
+      {
+        method: "GET",
+        handle: async (_req, res) =>
+          sendPage(
+            res,
+            200,
+            dependencies.dashboard
+              ? dependencies.dashboard.render(
+                  await dependencies.dashboard.listProspects(),
+                  undefined,
+                  randomUUID(),
+                  null,
+                )
+              : renderIntakeForm({ requestId: generateRequestId() }),
+            dependencies.dashboard
+              ? { "content-security-policy": dependencies.dashboard.csp }
+              : {},
+          ),
       },
-    }],
-    ["/review", {
-      method: "POST",
-      handle: async (req, res, host) => {
-        const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
-        const input = form && parseOrRenderInvalid(form.values, res);
-        if (input) sendPage(res, 200, renderIntakeReview(input));
+    ],
+    [
+      "/healthz",
+      {
+        method: "GET",
+        handle: (_req, res) => {
+          res.writeHead(200, {
+            "cache-control": "no-store",
+            "content-type": "text/plain; charset=utf-8",
+            "x-content-type-options": "nosniff",
+          });
+          res.end("ok\n");
+        },
       },
-    }],
-    ["/edit", {
-      method: "POST",
-      handle: async (req, res, host) => {
-        const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
-        if (!form) return;
-        sendPage(res, 200, renderIntakeForm({ requestId: form.values.requestId ?? "", values: form.values }));
+    ],
+    [
+      "/review",
+      {
+        method: "POST",
+        handle: async (req, res, host) => {
+          const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
+          const input = form && parseOrRenderInvalid(form.values, res);
+          if (input) sendPage(res, 200, renderIntakeReview(input));
+        },
       },
-    }],
-    ["/prospects", {
-      method: "POST",
-      handle: async (req, res, host) => {
-        const form = await readForm(req, res, host, CONFIRMED_FORM_FIELDS);
-        if (!form) return;
-        if (!form.confirmed) {
-          sendError(res, 400, "Confirmation required",
-            "Prospects are created only from the review page after you confirm. Nothing was created.");
-          return;
-        }
-        const input = parseOrRenderInvalid(form.values, res);
-        if (input) await createProspect(input, res);
+    ],
+    [
+      "/edit",
+      {
+        method: "POST",
+        handle: async (req, res, host) => {
+          const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
+          if (!form) return;
+          sendPage(
+            res,
+            200,
+            renderIntakeForm({
+              requestId: form.values.requestId ?? "",
+              values: form.values,
+            }),
+          );
+        },
       },
-    }],
+    ],
+    [
+      "/prospects",
+      {
+        method: "POST",
+        handle: async (req, res, host) => {
+          const form = await readForm(req, res, host, CONFIRMED_FORM_FIELDS);
+          if (!form) return;
+          if (!form.confirmed) {
+            sendError(
+              res,
+              400,
+              "Confirmation required",
+              "Prospects are created only from the review page after you confirm. Nothing was created.",
+            );
+            return;
+          }
+          const input = parseOrRenderInvalid(form.values, res);
+          if (input) await createProspect(input, res);
+        },
+      },
+    ],
     ...(dependencies.research ? researchRoutes(dependencies.research) : []),
+    ...dashboardRoutes,
   ]);
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function handle(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
     const host = req.headers.host?.toLowerCase();
     if (!host || !allowedHosts(server).has(host)) {
-      sendError(res, 403, "Request rejected",
-        "Relay accepts requests only at its loopback address. Nothing was created.");
+      sendError(
+        res,
+        403,
+        "Request rejected",
+        "Relay accepts requests only at its loopback address. Nothing was created.",
+      );
+      return;
+    }
+    const path = (req.url ?? "").split("?", 1)[0] ?? "";
+    if (askHandler && (path === "/ask" || path === "/answer")) {
+      await askHandler(req, res);
       return;
     }
     // Exact origin-form paths only; absolute-form targets are not routed.
@@ -438,8 +880,13 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       return;
     }
     if (req.method !== route.method) {
-      sendError(res, 405, "Method not allowed",
-        "This page does not accept that request method. Nothing was created.", { allow: route.method });
+      sendError(
+        res,
+        405,
+        "Method not allowed",
+        "This page does not accept that request method. Nothing was created.",
+        { allow: route.method },
+      );
       return;
     }
     await route.handle(req, res, host);
@@ -452,7 +899,12 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
         res.destroy();
         return;
       }
-      sendError(res, 500, "Something went wrong", "Relay could not complete this request.");
+      sendError(
+        res,
+        500,
+        "Something went wrong",
+        "Relay could not complete this request.",
+      );
     });
   });
   server.headersTimeout = 10_000;

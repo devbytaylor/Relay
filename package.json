@@ -8,6 +8,10 @@
     "pretest": "node --import tsx scripts/check-test-database.ts",
     "test": "tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "dev": "bash scripts/dev.sh serve",
+    "dev:init": "bash scripts/dev.sh init",
+    "dev:status": "bash scripts/dev.sh status",
+    "website:recovery": "tsx scripts/website-recovery.ts",
     "prospect:add": "tsx scripts/add-prospect.ts",
     "intake:ui": "tsx scripts/run-intake-ui.ts",
     "draft:outreach": "tsx scripts/create-outreach-draft.ts",
@@ -17,6 +21,7 @@
     "reply:process": "tsx scripts/process-reply.ts",
     "follow-up": "tsx scripts/follow-up.ts",
     "research": "tsx scripts/research-prospect.ts",
+    "ask-relay": "tsx scripts/ask-relay.ts",
     "outreach:operator": "tsx scripts/outreach-operator.ts"
   },
   "keywords": [],

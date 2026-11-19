@@ -2,15 +2,18 @@ import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 // Specifier characters only, so quoted text after an ordinary "from" in code is not read as an import.
 const SPECIFIER = /\b(?:from\s*|import\s*\(\s*|import\s+)["']([\w@./:-]+)["']/g;
 
 // Static import closure of a module, read from source without executing it.
-function importClosure(entry: string): { modules: string[]; packages: string[] } {
+function importClosure(entry: string): {
+  modules: string[];
+  packages: string[];
+} {
   const modules = new Set<string>();
   const packages = new Set<string>();
   const pending = [entry];
@@ -24,7 +27,10 @@ function importClosure(entry: string): { modules: string[]; packages: string[] }
         packages.add(specifier!);
         continue;
       }
-      const target = new URL(specifier!.replace(/\.js$/, ".ts"), new URL(path, `file://${root}`));
+      const target = new URL(
+        specifier!.replace(/\.js$/, ".ts"),
+        new URL(path, `file://${root}`),
+      );
       pending.push(relative(root, fileURLToPath(target)));
     }
   }
@@ -37,6 +43,8 @@ test("Intake UI process loads only intake, page, database, and research modules:
   // The Gmail entries are the OAuth client Drive shares and modules reached only through type imports.
   assert.deepEqual(modules, [
     "scripts/run-intake-ui.ts",
+    "src/data/canonical-data.ts",
+    "src/data/save-research-pages.ts",
     "src/db.ts",
     "src/gmail/gmail-auth.ts",
     "src/gmail/gmail-draft-creator.ts",
@@ -56,9 +64,21 @@ test("Intake UI process loads only intake, page, database, and research modules:
     "src/web/intake-server.ts",
   ]);
   // Nothing that builds a Gmail client for drafts or sending, and no job or worker code, may be reachable.
-  assert.deepEqual(modules.filter(path => /gmail-runtime|sender|^src\/jobs\/|worker/.test(path)), []);
+  assert.deepEqual(
+    modules.filter((path) =>
+      /gmail-runtime|sender|^src\/jobs\/|worker/.test(path),
+    ),
+    [],
+  );
   assert.deepEqual(packages, [
-    "dotenv/config", "googleapis", "node:crypto", "node:http", "node:net", "node:stream", "pg", "postal-mime",
+    "dotenv/config",
+    "googleapis",
+    "node:crypto",
+    "node:http",
+    "node:net",
+    "node:stream",
+    "pg",
+    "postal-mime",
   ]);
 });
 
@@ -80,5 +100,8 @@ test("Intake UI process hides unexpected startup error details", () => {
 
   assert.equal(result.status, 1);
   assert.equal(result.stderr.trim(), "Relay intake UI failed to start.");
-  assert.doesNotMatch(result.stderr, /RELAY_INTAKE_UI_PORT|invalid-secret-port/);
+  assert.doesNotMatch(
+    result.stderr,
+    /RELAY_INTAKE_UI_PORT|invalid-secret-port/,
+  );
 });
